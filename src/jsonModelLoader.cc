@@ -13,58 +13,76 @@ typedef v8::String String;
 typedef v8::Local<v8::Value> V8Value;
 typedef v8::Local<v8::Object> V8Object;
 typedef v8::Local<v8::Array> V8Array;
-typedef map<string, V8Value> ValueMap;
-typedef vector<ValueMap> VariableList;
-typedef map<string, int> IntMap;
-typedef vector<V8Value> Vector;
 
-static clock_t start = clock();
-static void logTime(const char * message) {
-    clock_t now = clock();
-    printf("%s: %lf\n", message, (now - start) / 1000.0);
-    start = now;
+static V8Value fromString(const char *str) {
+    return Nan::New<String>(str).ToLocalChecked();
 }
+
+class ArrayWrapper {
+public:
+    ArrayWrapper(V8Value value) {
+        this->array = V8Array::Cast(array);
+    }
+
+    ArrayWrapper(V8Array array) {
+        this->array = array;
+    }
+
+    V8Value operator [](int i) {
+        return this->array->Get(i);
+    }
+
+private:
+    V8Array array;
+};
+
+class ObjectWrapper {
+public:
+    ObjectWrapper(V8Value value) {
+        this->obj = V8Object::Cast(value);
+    }
+
+    ObjectWrapper(V8Object obj) {
+        this->obj = obj;
+    }
+
+    V8Value operator [](V8Value key) {
+        return this->obj->Get(key);
+    }
+
+    V8Value operator [](const char *key) {
+        return this->obj->Get(fromString(key));
+    }
+
+    V8Value operator [](string key) {
+        return this->obj->Get(fromString(key.c_str()));
+    }
+
+    size_t size() {
+        V8Array propertyNames = this->obj->GetPropertyNames();
+        return propertyNames->Length();
+    }
+
+    V8Array getPropertyNames() {
+        return this->obj->GetPropertyNames();
+    }
+
+    V8Value getPropertyName(size_t i) {
+        return this->getPropertyNames()->Get(i);
+    }
+
+private:
+    V8Object obj;
+};
 
 static void checkAndThrow(bool condition, const char *message) {
     if (condition) {
-        Nan::ThrowTypeError(message);
         throw message;
     }
 }
 
-static double toDouble(V8Value value) {
-    return value->NumberValue();
-}
-
 static string toString(V8Value value) {
-    return string(V8TOCSTRING(value));
-}
-
-static ValueMap toMap(V8Value value) {
-    ValueMap properties;
-
-    V8Object obj = V8Object::Cast(value);
-    V8Array propertyNames = obj->GetPropertyNames();
-    for (uint32_t i = 0; i < propertyNames->Length(); i++) {
-        V8Value name = propertyNames->Get(i);
-        V8Value value = obj->Get(name);
-
-        properties[string(V8TOCSTRING(name))] = value;
-    }
-
-    return properties;
-}
-
-static Vector toVector(V8Value value) {
-    V8Array array = V8Array::Cast(value);
-    Vector values;
-
-    for (uint32_t i = 0; i < array->Length(); i++) {
-        V8Value value = array->Get(i);
-        values.push_back(value);
-    }
-
-    return values;
+    return V8TOCSTRING(value);
 }
 
 static int getConstraintType(string operation) {
@@ -93,31 +111,31 @@ static int getConstraintType(string operation) {
 
 static pair<double, double> getConstraintBounds(string operation, V8Value operand) {
     if (operation == "max") {
-        return make_pair(0.0, toDouble(operand));
+        return make_pair(0.0, operand->NumberValue());
     }
 
     if (operation == "range") {
-        Vector range = toVector(operand);
-        return make_pair(toDouble(range[0]), toDouble(range[1]));
+        ArrayWrapper range(operand);
+        return make_pair(range[0]->NumberValue(), range[1]->NumberValue());
     }
 
     if (operation == "lower") {
-        return make_pair(toDouble(operand), 0.0);
+        return make_pair(operand->NumberValue(), 0.0);
     }
 
     if (operation == "upper") {
-        return make_pair(0.0, toDouble(operand));
+        return make_pair(0.0, operand->NumberValue());
     }
 
     if (operation == "equal") {
-        double value = toDouble(operand);
+        double value = operand->NumberValue();
         return make_pair(value, value);
     }
 
     return make_pair(0.0, 0.0);
 }
 
-static int getVariableKind(ValueMap variable) {
+static int getVariableKind(ObjectWrapper variable) {
     string kind = toString(variable["kind"]);
 
     if (kind == "binary") {
@@ -131,35 +149,39 @@ static int getVariableKind(ValueMap variable) {
     return GLP_CV;
 }
 
-static void addVariables(glp_prob *problem, ValueMap model, IntMap constraintIndices) {
+static void addVariables(glp_prob *problem, ObjectWrapper model, map<string, int> constraintIndices) {
     vector<int> ia(1);
     vector<int> ja(1);
     vector<double> ar(1);
 
-    string objective = toString(model["objective"]);
+    V8Value objective = model["objective"];
+    ObjectWrapper variables(model["variables"]);
 
-    ValueMap variables = toMap(model["variables"]);
-    glp_add_cols(problem, variables.size());
+    size_t numVariables = variables.size();
+    glp_add_cols(problem, numVariables);
 
-    size_t j = 1;
-    ValueMap::iterator itVar;
-    for (itVar = variables.begin(); itVar != variables.end(); ++itVar, ++j) {
-        string name = itVar->first;
-        ValueMap variable = toMap(itVar->second);
+    ArrayWrapper propertyNames(variables.getPropertyNames());
 
-        glp_set_col_name(problem, j, name.c_str());
-        glp_set_col_kind(problem, j, getVariableKind(variable));
+    for (size_t i = 0; i < numVariables; ++i) {
+        size_t index = i + 1;
+        string name = toString(propertyNames[i]);
+        ObjectWrapper variable(variables[name]);
 
-        ValueMap values = toMap(variable["values"]);
-        glp_set_obj_coef(problem, j, toDouble(values[objective]));
+        glp_set_col_name(problem, index, name.c_str());
+        glp_set_col_kind(problem, index, getVariableKind(variable));
 
-        ValueMap::iterator it;
-        for (it = values.begin(); it != values.end(); ++it) {
-            IntMap::iterator constraint = constraintIndices.find(it->first);
+        ObjectWrapper values(variable["values"]);
+        glp_set_obj_coef(problem, index, values[objective]->NumberValue());
+
+        size_t numValues = values.size();
+        ArrayWrapper valueNames(values.getPropertyNames());
+        for (size_t i = 0; i < numValues; ++i) {
+            V8Value name = valueNames[i];
+            map<string, int>::iterator constraint = constraintIndices.find(toString(name));
             if (constraint != constraintIndices.end()) {
                 ia.push_back(constraint->second);
-                ja.push_back(j);
-                ar.push_back(toDouble(it->second));
+                ja.push_back(index);
+                ar.push_back(values[name]->NumberValue());
             }
         }
     }
@@ -167,36 +189,38 @@ static void addVariables(glp_prob *problem, ValueMap model, IntMap constraintInd
     glp_load_matrix(problem, ar.size() - 1, ia.data(), ja.data(), ar.data());
 }
 
-static IntMap addConstraints(glp_prob *problem, ValueMap model) {
-    ValueMap constraints = toMap(model["constraints"]);
-    glp_add_rows(problem, constraints.size());
+static map<string, int> addConstraints(glp_prob *problem, ObjectWrapper model) {
+    ObjectWrapper constraints(model["constraints"]);
 
-    IntMap constraintIndices;
+    size_t size = constraints.size();
+    glp_add_rows(problem, size);
 
-    size_t i = 1;
-    ValueMap::iterator it;
-    for (it = constraints.begin(); it != constraints.end(); ++it, ++i) {
-        string name = it->first;
-        constraintIndices[name] = i;
+    map<string, int> constraintIndices;
+    ArrayWrapper propertyNames(constraints.getPropertyNames());
 
-        glp_set_row_name(problem, i, name.c_str());
+    for (size_t i = 0; i < size; ++i) {
+        size_t index = i + 1;
+        string name = toString(propertyNames[i]);
+        constraintIndices[name] = index;
 
-        ValueMap constraint = toMap(it->second);
+        glp_set_row_name(problem, index, name.c_str());
+
+        ObjectWrapper constraint(constraints[name]);
         checkAndThrow(constraint.size() != 1, "Constraints may contain only a single operation.");
 
-        ValueMap::iterator onlyProperty = constraint.begin();
-        string operation = onlyProperty->first;
-        V8Value operand = onlyProperty->second;
+        V8Value propertyName = constraint.getPropertyName(0);
+        string operation = toString(propertyName);
+        V8Value operand = constraint[propertyName];
 
         int type = getConstraintType(operation);
         pair<double, double> bounds = getConstraintBounds(operation, operand);
-        glp_set_row_bnds(problem, i, type, bounds.first, bounds.second);
+        glp_set_row_bnds(problem, index, type, bounds.first, bounds.second);
     }
 
     return constraintIndices;
 }
 
-static int getDirection(ValueMap model) {
+static int getDirection(ObjectWrapper model) {
     string direction = toString(model["direction"]);
 
     if (direction == "maximize") {
@@ -213,19 +237,20 @@ static int getDirection(ValueMap model) {
 
 namespace NodeGLPK {
     void JsonModelLoader::Load(glp_prob *problem, V8Object modelObj) {
-        logTime("start");
-        ValueMap model = toMap(modelObj);
-        logTime("model toMap");
+        try {
+            ObjectWrapper model(modelObj);
 
-        glp_set_prob_name(problem, toString(model["name"]).c_str());
-        glp_set_obj_dir(problem, getDirection(model));
+            glp_set_prob_name(problem, toString(model["name"]).c_str());
+            glp_set_obj_dir(problem, getDirection(model));
 
-        logTime("before addConstraints");
-
-        IntMap constraintIndices = addConstraints(problem, model);
-        logTime("added constraints");
-
-        addVariables(problem, model, constraintIndices);
-        logTime("added variables");
+            map<string, int> constraintIndices = addConstraints(problem, model);
+            addVariables(problem, model, constraintIndices);
+        } catch (const char *msg) {
+            Nan::ThrowTypeError(msg);
+        } catch (string msg) {
+            Nan::ThrowTypeError(msg.c_str());
+        } catch (...) {
+            Nan::ThrowTypeError("Unknown execption");
+        }
     }
 }
