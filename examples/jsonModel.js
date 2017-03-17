@@ -2,6 +2,12 @@ var glp = require("..");
 var model = require("./model.json");
 var prob = new glp.Problem();
 
+console.time("load");
+for (var i = 0; i < 100; ++i) {
+  var prob = new glp.Problem();
+  prob.loadJsonModel(model);
+}
+console.timeEnd("load");
 
 console.time("load");
 prob.loadJsonModel(model);

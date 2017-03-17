@@ -131,51 +131,40 @@ static int getVariableKind(ValueMap variable) {
     return GLP_CV;
 }
 
-static void populateMatrix(glp_prob *problem, VariableList variables, IntMap constraintIndices) {
-    vector<int> rowIndices(1);
-    vector<int> columnIndices(1);
-    vector<double> values(1);
+static void addVariables(glp_prob *problem, ValueMap model, IntMap constraintIndices) {
+    vector<int> ia(1);
+    vector<int> ja(1);
+    vector<double> ar(1);
 
-    for (size_t j = 0; j < variables.size(); ++j) {
-        ValueMap props = variables[j];
-        ValueMap::iterator it;
-        for (it = props.begin(); it != props.end(); ++it) {
-            string name = it->first;
-            IntMap::iterator constraint = constraintIndices.find(name);
-            if (constraint != constraintIndices.end()) {
-                int i = constraint->second;
-                rowIndices.push_back(i);
-                columnIndices.push_back(j + 1);
-                values.push_back(toDouble(it->second));
-            }
-        }
-    }
-    glp_load_matrix(problem, values.size() - 1, rowIndices.data(), columnIndices.data(), values.data());
-}
-
-static VariableList addVariables(glp_prob *problem, ValueMap model) {
     string objective = toString(model["objective"]);
 
     ValueMap variables = toMap(model["variables"]);
     glp_add_cols(problem, variables.size());
 
-    VariableList variableList;
+    size_t j = 1;
+    ValueMap::iterator itVar;
+    for (itVar = variables.begin(); itVar != variables.end(); ++itVar, ++j) {
+        string name = itVar->first;
+        ValueMap variable = toMap(itVar->second);
 
-    size_t i = 1;
-    ValueMap::iterator it;
-    for (it = variables.begin(); it != variables.end(); ++it, ++i) {
-        string name = it->first;
-        ValueMap variable = toMap(it->second);
-
-        glp_set_col_name(problem, i, name.c_str());
-        glp_set_col_kind(problem, i, getVariableKind(variable));
+        glp_set_col_name(problem, j, name.c_str());
+        glp_set_col_kind(problem, j, getVariableKind(variable));
 
         ValueMap values = toMap(variable["values"]);
-        variableList.push_back(values);
-        glp_set_obj_coef(problem, i, toDouble(values[objective]));
+        glp_set_obj_coef(problem, j, toDouble(values[objective]));
+
+        ValueMap::iterator it;
+        for (it = values.begin(); it != values.end(); ++it) {
+            IntMap::iterator constraint = constraintIndices.find(it->first);
+            if (constraint != constraintIndices.end()) {
+                ia.push_back(constraint->second);
+                ja.push_back(j);
+                ar.push_back(toDouble(it->second));
+            }
+        }
     }
 
-    return variableList;
+    glp_load_matrix(problem, ar.size() - 1, ia.data(), ja.data(), ar.data());
 }
 
 static IntMap addConstraints(glp_prob *problem, ValueMap model) {
@@ -232,11 +221,11 @@ namespace NodeGLPK {
         glp_set_obj_dir(problem, getDirection(model));
 
         logTime("before addConstraints");
+
         IntMap constraintIndices = addConstraints(problem, model);
         logTime("added constraints");
-        VariableList variables = addVariables(problem, model);
+
+        addVariables(problem, model, constraintIndices);
         logTime("added variables");
-        populateMatrix(problem, variables, constraintIndices);
-        logTime("populated matrix");
     }
 }
