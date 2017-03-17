@@ -2,7 +2,7 @@
   "targets": [
     {
       "target_name": "glpk",
-      "sources": [ "src/nodeglpk.cc", "src/problem.hpp", "src/tree.hpp"],
+      "sources": [ "src/nodeglpk.cc", "src/problem.hpp", "src/tree.hpp", "src/jsonModelLoader.cc"],
       "cflags": [ "-fexceptions" ],
       "cflags_cc": [ "-fexceptions" ],
       "conditions": [

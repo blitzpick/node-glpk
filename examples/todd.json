@@ -1,0 +1,102 @@
+{
+    "name": "todd",
+    "direction": "maximize",
+    "objective": "value",
+    "constraints": {
+        "value": {
+            "max": 4194303.5
+        }
+    },
+    "variables": {
+        "x1": {
+            "kind": "binary",
+            "values": {
+                "value": 786433
+            }
+        },
+        "x2": {
+            "kind": "binary",
+            "values": {
+                "value": 655361
+            }
+        },
+        "x3": {
+            "kind": "binary",
+            "values": {
+                "value": 589825
+            }
+        },
+        "x4": {
+            "kind": "binary",
+            "values": {
+                "value": 557057
+            }
+        },
+        "x5": {
+            "kind": "binary",
+            "values": {
+                "value": 540673
+            }
+        },
+        "x6": {
+            "kind": "binary",
+            "values": {
+                "value": 532481
+            }
+        },
+        "x7": {
+            "kind": "binary",
+            "values": {
+                "value": 528385
+            }
+        },
+        "x8": {
+            "kind": "binary",
+            "values": {
+                "value": 526337
+            }
+        },
+        "x9": {
+            "kind": "binary",
+            "values": {
+                "value": 525313
+            }
+        },
+        "x10": {
+            "kind": "binary",
+            "values": {
+                "value": 524801
+            }
+        },
+        "x11": {
+            "kind": "binary",
+            "values": {
+                "value": 524545
+            }
+        },
+        "x12": {
+            "kind": "binary",
+            "values": {
+                "value": 524417
+            }
+        },
+        "x13": {
+            "kind": "binary",
+            "values": {
+                "value": 524353
+            }
+        },
+        "x14": {
+            "kind": "binary",
+            "values": {
+                "value": 524321
+            }
+        },
+        "x15": {
+            "kind": "binary",
+            "values": {
+                "value": 524305
+            }
+        }
+    }
+}
