@@ -66,7 +66,7 @@ public:
         return obj->IsUndefined();
     }
 
-    size_t size() {
+    int size() {
         V8Array propertyNames = this->obj->GetPropertyNames();
         return propertyNames->Length();
     }
@@ -75,7 +75,7 @@ public:
         return this->obj->GetPropertyNames();
     }
 
-    V8Value getPropertyName(size_t i) {
+    V8Value getPropertyName(int i) {
         return this->getPropertyNames()->Get(i);
     }
 
@@ -106,7 +106,7 @@ public:
         this->ar.push_back(value);
     }
 
-    void addConstraintIndex(string name, size_t index) {
+    void addConstraintIndex(string name, int index) {
         this->constraintIndices[name] = index;
     }
 
@@ -211,7 +211,7 @@ static int getVariableKind(ObjectWrapper variable) {
     return GLP_CV;
 }
 
-static void setConstraintBounds(glp_prob *problem, ObjectWrapper constraint, size_t index, V8Value operationName) {
+static void setConstraintBounds(glp_prob *problem, ObjectWrapper constraint, int index, V8Value operationName) {
     string operation = toString(operationName);
     V8Value operand = constraint[operationName];
 
@@ -230,20 +230,19 @@ static V8Value getDependentConstraintOperationName(ObjectWrapper dependentConstr
     return propertyNames[1];
 }
 
-static bool addDependentConstraints(glp_prob *problem, Model &model) {
-    ObjectWrapper dependentConstraints(model["dependentConstraints"]);
+static void addDependentConstraints(glp_prob *problem, ObjectWrapper dependentConstraints) {
     if (dependentConstraints.isUndefined()) {
-        return false;
+        return;
     }
 
-    size_t numDependentConstraints = dependentConstraints.size();
+    int numDependentConstraints = dependentConstraints.size();
 
-    size_t numStandardConstraints = glp_get_num_rows(problem);
-    glp_add_rows(problem, numDependentConstraints);
+    int start = glp_add_rows(problem, numDependentConstraints);
+    int numValues = glp_get_num_cols(problem);
 
     ArrayWrapper dependentConstraintNames(dependentConstraints.getPropertyNames());
-    for (size_t i = 0; i < numDependentConstraints; ++i) {
-        size_t constraintIndex = numStandardConstraints + i + 1;
+    for (int i = 0; i < numDependentConstraints; ++i) {
+        int constraintIndex = start + i;
         string name = toString(dependentConstraintNames[i]);
 
         glp_set_row_name(problem, constraintIndex, name.c_str());
@@ -254,16 +253,15 @@ static bool addDependentConstraints(glp_prob *problem, Model &model) {
         V8Value operationName = getDependentConstraintOperationName(dependentConstraint);
         setConstraintBounds(problem, dependentConstraint, constraintIndex, operationName);
 
-        size_t numValues = glp_get_num_cols(problem);
         vector<double> values(numValues + 1);
         int rowIndices[numValues + 1];
         double rowValues[numValues + 1];
 
         ObjectWrapper terms = dependentConstraint["terms"];
 
-        size_t numTerms = terms.size();
+        int numTerms = terms.size();
         ArrayWrapper termNames(terms.getPropertyNames());
-        for (size_t i = 0; i < numTerms; ++i) {
+        for (int i = 0; i < numTerms; ++i) {
             V8Value termName = termNames[i];
             ObjectWrapper term(terms[termName]);
 
@@ -271,20 +269,20 @@ static bool addDependentConstraints(glp_prob *problem, Model &model) {
             double coefficient = term["coefficient"]->NumberValue();
             double constant = term["constant"]->NumberValue();
 
-            int constraintIndex = model.getConstraintIndex(toString(termName));
+            int constraintIndex = glp_find_row(problem, toString(termName).c_str());
             checkAndThrow(constraintIndex <= 0, "Found an unknown constraint name in the terms object");
-            size_t count = glp_get_mat_row(problem, constraintIndex, rowIndices, rowValues);
-            for (size_t i = 0; i < count; ++i) {
+            int count = glp_get_mat_row(problem, constraintIndex, rowIndices, rowValues);
+            for (int i = 0; i < count; ++i) {
                 values[rowIndices[i + 1]] += ((rowValues[i + 1] * coefficient) + constant);
             }
         }
 
-        for (size_t i = 0; i < numValues; ++i) {
-            model.addMatrixEntry(constraintIndex, i + 1, values[i + 1]);
+        int indices[numValues + 1];
+        for (int i = 0; i < numValues; ++i) {
+            indices[i + 1] = i + 1;
         }
+        glp_set_mat_row(problem, constraintIndex, numValues, indices, values.data());
     }
-
-    return true;
 }
 
 static void addVariables(glp_prob *problem, Model &model) {
@@ -294,12 +292,12 @@ static void addVariables(glp_prob *problem, Model &model) {
     ObjectWrapper variables(model["variables"]);
     checkAndThrow(variables.isUndefined(), "You must specify variables in the model");
 
-    size_t numVariables = variables.size();
+    int numVariables = variables.size();
     glp_add_cols(problem, numVariables);
 
     ArrayWrapper variableNames(variables.getPropertyNames());
-    for (size_t i = 0; i < numVariables; ++i) {
-        size_t index = i + 1;
+    for (int i = 0; i < numVariables; ++i) {
+        int index = i + 1;
         V8Value name = variableNames[i];
         ObjectWrapper variable(variables[name]);
 
@@ -309,9 +307,9 @@ static void addVariables(glp_prob *problem, Model &model) {
         ObjectWrapper values(variable["values"]);
         glp_set_obj_coef(problem, index, values[objective]->NumberValue());
 
-        size_t numValues = values.size();
+        int numValues = values.size();
         ArrayWrapper valueNames(values.getPropertyNames());
-        for (size_t i = 0; i < numValues; ++i) {
+        for (int i = 0; i < numValues; ++i) {
             V8Value name = valueNames[i];
             int constraintIndex = model.getConstraintIndex(toString(name));
             if (constraintIndex > 0) {
@@ -326,13 +324,13 @@ static void addConstraints(glp_prob *problem, Model &model) {
     ObjectWrapper constraints(model["constraints"]);
     checkAndThrow(constraints.isUndefined(), "You must specify constraints in the model");
 
-    size_t size = constraints.size();
+    int size = constraints.size();
     glp_add_rows(problem, size);
 
     ArrayWrapper constraintNames(constraints.getPropertyNames());
 
-    for (size_t i = 0; i < size; ++i) {
-        size_t index = i + 1;
+    for (int i = 0; i < size; ++i) {
+        int index = i + 1;
         string name = toString(constraintNames[i]);
         model.addConstraintIndex(name, index);
 
@@ -362,22 +360,33 @@ static int getDirection(Model &model) {
 }
 
 namespace NodeGLPK {
-    void JsonModelLoader::Load(glp_prob *problem, V8Object modelObj) {
+    void JsonModelLoader::Load(glp_prob *problem, V8Object _model) {
         try {
-            Model model(modelObj);
+            Model model(_model);
 
+            glp_create_index(problem);
             glp_set_prob_name(problem, toString(model["name"]).c_str());
             glp_set_obj_dir(problem, getDirection(model));
 
             addConstraints(problem, model);
             addVariables(problem, model);
 
-            // Load the matrix (without dependent constraints)
             model.loadMatrixIntoProblem(problem);
 
-            if (addDependentConstraints(problem, model)) {
-                model.loadMatrixIntoProblem(problem);
-            }
+            ObjectWrapper dependentConstraints(model["dependentConstraints"]);
+            addDependentConstraints(problem, dependentConstraints);
+        } catch (const char *msg) {
+            Nan::ThrowTypeError(msg);
+        } catch (string msg) {
+            Nan::ThrowTypeError(msg.c_str());
+        } catch (...) {
+            Nan::ThrowTypeError("Unknown execption");
+        }
+    }
+
+    void JsonModelLoader::AddDependentConstraints(glp_prob *problem, V8Object dependentConstraints) {
+        try {
+            addDependentConstraints(problem, dependentConstraints);
         } catch (const char *msg) {
             Nan::ThrowTypeError(msg);
         } catch (string msg) {

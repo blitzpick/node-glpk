@@ -37,6 +37,7 @@ namespace NodeGLPK {
             Nan::SetPrototypeMethod(tpl, "getObjCoef", GetObjCoef);
             Nan::SetPrototypeMethod(tpl, "loadMatrix", LoadMatrix);
             Nan::SetPrototypeMethod(tpl, "loadJsonModel", LoadJsonModel);
+            Nan::SetPrototypeMethod(tpl, "addDependentConstraints", AddDependentConstraints);
             Nan::SetPrototypeMethod(tpl, "simplexSync", SimplexSync);
             Nan::SetPrototypeMethod(tpl, "simplex", Simplex);
             Nan::SetPrototypeMethod(tpl, "getObjVal", GetObjVal);
@@ -269,6 +270,16 @@ namespace NodeGLPK {
             Problem* lp = ObjectWrap::Unwrap<Problem>(info.Holder());
 
             JsonModelLoader::Load(lp->handle, model);
+        }
+
+        static NAN_METHOD(AddDependentConstraints) {
+            V8CHECK(info.Length() != 1, "Wrong number of arguments");
+            V8CHECK(!info[0]->IsObject(), "Wrong arguments");
+
+            Local<Object> dependentConstraints = Local<Object>::Cast(info[0]);
+            Problem* lp = ObjectWrap::Unwrap<Problem>(info.Holder());
+
+            JsonModelLoader::AddDependentConstraints(lp->handle, dependentConstraints);
         }
 
         static NAN_METHOD(SimplexSync) {
