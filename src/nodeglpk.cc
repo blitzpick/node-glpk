@@ -10,31 +10,39 @@ using namespace v8;
 using namespace NodeGLPK;
 
 extern "C" {
-    void _ErrorHook(void *s){
+    void _ErrorHook(void *s) {
         throw std::string((const char *)s);
     }
 
-    int _TermHook(void *info, const char *s){
-        fputs(s, stdout);
-        fflush(stdout);
+    int _SilentTermHook(void *info, const char *s) {
         return 1;
     }
 
-    NAN_METHOD(TermOutput) {
-        V8CHECK(info.Length() != 1, "Wrong number of arguments");
-        V8CHECK(!info[0]->IsBoolean(), "Wrong arguments");
+    int _TermHook(void *info, const char *str) {
+        Nan::Callback *callback = (Nan::Callback *)info;
+        Local<Value> argv[1];
+        argv[0] = Nan::New<String>(str).ToLocalChecked();
+        callback->Call(1, argv);
+        return 1;
+    }
 
-        if (info[0]->BooleanValue()) {
-            GLP_CATCH_RET(glp_term_hook(_TermHook, NULL);)
+    NAN_METHOD(CaptureTerminal) {
+        V8CHECK(info.Length() != 1, "Wrong number of arguments");
+        V8CHECK(!info[0]->IsFunction() && !info[0]->IsUndefined(), "Wrong arguments");
+
+        if (info[0]->IsUndefined()) {
+            glp_term_hook(_SilentTermHook, NULL);
         } else {
-            GLP_CATCH_RET(glp_term_hook(NULL, NULL);)
+            Nan::Callback *callback = new Nan::Callback(info[0].As<Function>());
+            glp_term_hook(_TermHook, callback);
         }
     }
 
     void Init(Handle<Object> exports) {
         glp_error_hook(_ErrorHook, NULL);
+        glp_term_hook(_SilentTermHook, NULL);
 
-        exports->Set(Nan::New<String>("termOutput").ToLocalChecked(), Nan::New<FunctionTemplate>(TermOutput)->GetFunction());
+        exports->Set(Nan::New<String>("captureTerminal").ToLocalChecked(), Nan::New<FunctionTemplate>(CaptureTerminal)->GetFunction());
 
         GLP_DEFINE_CONSTANT(exports, GLP_MAJOR_VERSION, MAJOR_VERSION);
         GLP_DEFINE_CONSTANT(exports, GLP_MINOR_VERSION, MINOR_VERSION);
