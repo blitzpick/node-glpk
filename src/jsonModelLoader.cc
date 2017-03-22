@@ -244,44 +244,48 @@ static void addDependentConstraints(glp_prob *problem, ObjectWrapper dependentCo
     for (int i = 0; i < numDependentConstraints; ++i) {
         int constraintIndex = start + i;
         string name = toString(dependentConstraintNames[i]);
-
-        glp_set_row_name(problem, constraintIndex, name.c_str());
-
         ObjectWrapper dependentConstraint(dependentConstraints[name]);
-        checkAndThrow(dependentConstraint.size() != 2, "Dependent constraints must contain a terms object and an operation");
 
-        V8Value operationName = getDependentConstraintOperationName(dependentConstraint);
-        setConstraintBounds(problem, dependentConstraint, constraintIndex, operationName);
+        if (!dependentConstraint.isUndefined()) {
+            glp_set_row_name(problem, constraintIndex, name.c_str());
 
-        vector<double> values(numValues + 1);
-        int rowIndices[numValues + 1];
-        double rowValues[numValues + 1];
+            checkAndThrow(dependentConstraint.size() != 2, "Dependent constraints must contain a terms object and an operation");
 
-        ObjectWrapper terms = dependentConstraint["terms"];
+            V8Value operationName = getDependentConstraintOperationName(dependentConstraint);
+            setConstraintBounds(problem, dependentConstraint, constraintIndex, operationName);
 
-        int numTerms = terms.size();
-        ArrayWrapper termNames(terms.getPropertyNames());
-        for (int i = 0; i < numTerms; ++i) {
-            V8Value termName = termNames[i];
-            ObjectWrapper term(terms[termName]);
+            vector<double> values(numValues + 1);
+            int rowIndices[numValues + 1];
+            double rowValues[numValues + 1];
 
-            checkAndThrow(term.size() != 2, "Dependent constraint terms must contain a coefficient and a constant");
-            double coefficient = term["coefficient"]->NumberValue();
-            double constant = term["constant"]->NumberValue();
+            ObjectWrapper terms = dependentConstraint["terms"];
 
-            int constraintIndex = glp_find_row(problem, toString(termName).c_str());
-            checkAndThrow(constraintIndex <= 0, "Found an unknown constraint name in the terms object");
-            int count = glp_get_mat_row(problem, constraintIndex, rowIndices, rowValues);
-            for (int i = 0; i < count; ++i) {
-                values[rowIndices[i + 1]] += ((rowValues[i + 1] * coefficient) + constant);
+            int numTerms = terms.size();
+            ArrayWrapper termNames(terms.getPropertyNames());
+            for (int i = 0; i < numTerms; ++i) {
+                V8Value termName = termNames[i];
+                ObjectWrapper term(terms[termName]);
+
+                if (!term.isUndefined()) {
+                    checkAndThrow(term.size() != 2, "Dependent constraint terms must contain a coefficient and a constant");
+                    double coefficient = term["coefficient"]->NumberValue();
+                    double constant = term["constant"]->NumberValue();
+
+                    int constraintIndex = glp_find_row(problem, toString(termName).c_str());
+                    checkAndThrow(constraintIndex <= 0, "Found an unknown constraint name in the terms object");
+                    int count = glp_get_mat_row(problem, constraintIndex, rowIndices, rowValues);
+                    for (int i = 0; i < count; ++i) {
+                        values[rowIndices[i + 1]] += ((rowValues[i + 1] * coefficient) + constant);
+                    }
+                }
             }
-        }
 
-        int indices[numValues + 1];
-        for (int i = 0; i < numValues; ++i) {
-            indices[i + 1] = i + 1;
+            int indices[numValues + 1];
+            for (int i = 0; i < numValues; ++i) {
+                indices[i + 1] = i + 1;
+            }
+            glp_set_mat_row(problem, constraintIndex, numValues, indices, values.data());
         }
-        glp_set_mat_row(problem, constraintIndex, numValues, indices, values.data());
     }
 }
 
@@ -301,20 +305,22 @@ static void addVariables(glp_prob *problem, Model &model) {
         V8Value name = variableNames[i];
         ObjectWrapper variable(variables[name]);
 
-        glp_set_col_name(problem, index, toString(name).c_str());
-        glp_set_col_kind(problem, index, getVariableKind(variable));
+        if (!variable.isUndefined()) {
+            glp_set_col_name(problem, index, toString(name).c_str());
+            glp_set_col_kind(problem, index, getVariableKind(variable));
 
-        ObjectWrapper values(variable["values"]);
-        glp_set_obj_coef(problem, index, values[objective]->NumberValue());
+            ObjectWrapper values(variable["values"]);
+            glp_set_obj_coef(problem, index, values[objective]->NumberValue());
 
-        int numValues = values.size();
-        ArrayWrapper valueNames(values.getPropertyNames());
-        for (int i = 0; i < numValues; ++i) {
-            V8Value name = valueNames[i];
-            int constraintIndex = model.getConstraintIndex(toString(name));
-            if (constraintIndex > 0) {
-                double value = values[name]->NumberValue();
-                model.addMatrixEntry(constraintIndex, index, value);
+            int numValues = values.size();
+            ArrayWrapper valueNames(values.getPropertyNames());
+            for (int i = 0; i < numValues; ++i) {
+                V8Value name = valueNames[i];
+                int constraintIndex = model.getConstraintIndex(toString(name));
+                if (constraintIndex > 0) {
+                    double value = values[name]->NumberValue();
+                    model.addMatrixEntry(constraintIndex, index, value);
+                }
             }
         }
     }
@@ -332,19 +338,25 @@ static void addConstraints(glp_prob *problem, Model &model) {
     for (int i = 0; i < size; ++i) {
         int index = i + 1;
         string name = toString(constraintNames[i]);
-        model.addConstraintIndex(name, index);
-
-        glp_set_row_name(problem, index, name.c_str());
-
         ObjectWrapper constraint(constraints[name]);
-        checkAndThrow(constraint.size() != 1, "Constraints may contain only a single operation.");
 
-        V8Value operationName = constraint.getPropertyName(0);
-        setConstraintBounds(problem, constraint, index, operationName);
+        if (!constraint.isUndefined()) {
+            model.addConstraintIndex(name, index);
+
+            glp_set_row_name(problem, index, name.c_str());
+
+            checkAndThrow(constraint.size() != 1, "Constraints may contain only a single operation.");
+
+            V8Value operationName = constraint.getPropertyName(0);
+            setConstraintBounds(problem, constraint, index, operationName);
+        }
     }
 }
 
 static int getDirection(Model &model) {
+    V8Value directionValue = model["direction"];
+    checkAndThrow(!directionValue->IsString(), "The model's direction property must be either 'minimize' or 'maximize'");
+
     string direction = toString(model["direction"]);
 
     if (direction == "maximize") {
@@ -355,8 +367,7 @@ static int getDirection(Model &model) {
         return GLP_MIN;
     }
 
-    checkAndThrow(true, "'direction' must be either 'minimize' or 'maximize'");
-    return GLP_MAX;
+    throw "'direction' must be either 'minimize' or 'maximize'";
 }
 
 namespace NodeGLPK {
@@ -365,7 +376,12 @@ namespace NodeGLPK {
             Model model(_model);
 
             glp_create_index(problem);
-            glp_set_prob_name(problem, toString(model["name"]).c_str());
+
+            V8Value name = model["name"];
+            if (name->IsString()) {
+                glp_set_prob_name(problem, toString(name).c_str());
+            }
+
             glp_set_obj_dir(problem, getDirection(model));
 
             addConstraints(problem, model);
