@@ -22,7 +22,7 @@
 *  along with GLPK. If not, see <http://www.gnu.org/licenses/>.
 ***********************************************************************/
 
-#include "glpenv.h"
+#include "env.h"
 #include "glpnpp.h"
 
 NPP *npp_create_wksp(void)

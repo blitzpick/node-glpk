@@ -21,11 +21,7 @@
 *  along with GLPK. If not, see <http://www.gnu.org/licenses/>.
 ***********************************************************************/
 
-#include "glpenv.h"
-
-#ifndef HAVE_ENV
-static void (*_error_hook_)(const char *s) = NULL;
-#endif
+#include "env.h"
 
 /***********************************************************************
 *  NAME
@@ -43,9 +39,7 @@ static void (*_error_hook_)(const char *s) = NULL;
 *  message on the terminal, and abnormally terminates the program. */
 
 static void errfunc(const char *fmt, ...)
-{
-#ifdef HAVE_ENV
-      ENV *env = get_env_ptr();
+{     ENV *env = get_env_ptr();
       va_list arg;
 #if 1 /* 07/XI-2015 */
       env->err_st = 1;
@@ -58,46 +52,18 @@ static void errfunc(const char *fmt, ...)
          env->err_file, env->err_line);
       if (env->err_hook != NULL)
          env->err_hook(env->err_info);
-#else
-    char term_buf[TBUF_SIZE];
-    va_list arg;
-    // format the output
-    va_start(arg, fmt);
-    vsprintf(term_buf, fmt, arg);
-    va_end(arg);
-
-    if (_error_hook_){
-        // remove annoying CR
-        int i;
-        for (i = 0; i < TBUF_SIZE - 1; i++){
-            if (term_buf[i] == '\n' && term_buf[i+1] == 0) {
-                term_buf[i] = 0;
-                break;
-            } else
-                if(term_buf[i] == 0)
-                    break;
-        }
-        _error_hook_(term_buf);
-    }
-#endif
       abort();
       exit(EXIT_FAILURE);
       /* no return */
 }
 
 glp_errfunc glp_error_(const char *file, int line)
-{
-#ifdef HAVE_ENV
-    ENV *env = get_env_ptr();
-    env->err_file = file;
-    env->err_line = line;
-#else
-    xprintf("Error detected in file %s at line %d\n", file, line);
-#endif
-    return errfunc;
+{     ENV *env = get_env_ptr();
+      env->err_file = file;
+      env->err_line = line;
+      return errfunc;
 }
 
-#ifdef HAVE_ENV
 #if 1 /* 07/XI-2015 */
 /***********************************************************************
 *  NAME
@@ -124,7 +90,6 @@ int glp_at_error(void)
       return env->err_st;
 }
 #endif
-#endif
 
 /***********************************************************************
 *  NAME
@@ -143,9 +108,8 @@ int glp_at_error(void)
 *  the terminal and abnormally terminates the program. */
 
 void glp_assert_(const char *expr, const char *file, int line)
-{
-    glp_error_(file, line)("Assertion failed: %s\n", expr);
-    /* no return */
+{     glp_error_(file, line)("Assertion failed: %s\n", expr);
+      /* no return */
 }
 
 /***********************************************************************
@@ -172,10 +136,8 @@ void glp_assert_(const char *expr, const char *file, int line)
 *  To uninstall the hook routine the parameters func and info should be
 *  both specified as NULL. */
 
-#ifdef HAVE_ENV
 void glp_error_hook(void (*func)(void *info), void *info)
-{
-      ENV *env = get_env_ptr();
+{     ENV *env = get_env_ptr();
       if (func == NULL)
       {  env->err_hook = NULL;
          env->err_info = NULL;
@@ -186,15 +148,6 @@ void glp_error_hook(void (*func)(void *info), void *info)
       }
       return;
 }
-#else
-
-void glp_error_hook(void (*func)())
-{
-    _error_hook_ = func;
-    return;
-}
-
-#endif
 
 /***********************************************************************
 *  NAME
@@ -203,7 +156,7 @@ void glp_error_hook(void (*func)())
 *
 *  SYNOPSIS
 *
-*  #include "glpenv.h"
+*  #include "env.h"
 *  void put_err_msg(const char *msg);
 *
 *  DESCRIPTION
@@ -212,9 +165,7 @@ void glp_error_hook(void (*func)())
 *  msg to the environment block. */
 
 void put_err_msg(const char *msg)
-{
-#ifdef HAVE_ENV
-      ENV *env = get_env_ptr();
+{     ENV *env = get_env_ptr();
       int len;
       len = strlen(msg);
       if (len >= EBUF_SIZE)
@@ -224,7 +175,6 @@ void put_err_msg(const char *msg)
          len--;
       env->err_buf[len] = '\0';
       return;
-#endif
 }
 
 /***********************************************************************
@@ -234,7 +184,7 @@ void put_err_msg(const char *msg)
 *
 *  SYNOPSIS
 *
-*  #include "glpenv.h"
+*  #include "env.h"
 *  const char *get_err_msg(void);
 *
 *  RETURNS
@@ -243,12 +193,8 @@ void put_err_msg(const char *msg)
 *  previously stored by the routine put_err_msg. */
 
 const char *get_err_msg(void)
-{
-#ifdef HAVE_ENV
-      ENV *env = get_env_ptr();
+{     ENV *env = get_env_ptr();
       return env->err_buf;
-#else
-    return "";
-#endif
 }
+
 /* eof */

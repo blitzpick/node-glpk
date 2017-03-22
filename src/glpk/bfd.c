@@ -22,7 +22,7 @@
 ***********************************************************************/
 
 #include "glpk.h"
-#include "glpenv.h"
+#include "env.h"
 #include "bfd.h"
 #include "fhvint.h"
 #include "scfint.h"
@@ -269,12 +269,12 @@ int bfd_factorize(BFD *bfd, int m, /*const int bh[],*/ int (*col1)
 #endif
       if (ret == 0)
       {  /* factorization has been successfully computed */
-          double cond;
-          bfd->valid = 1;
+         double cond;
+         bfd->valid = 1;
 #ifdef GLP_DEBUG
-          cond = bfd_condest(bfd);
-          if (cond > 1e9)
-              xprintf("bfd_factorize: warning: cond(B) = %g\n", cond);
+         cond = bfd_condest(bfd);
+         if (cond > 1e9)
+            xprintf("bfd_factorize: warning: cond(B) = %g\n", cond);
 #endif
       }
 #ifdef GLP_DEBUG
@@ -358,6 +358,24 @@ void bfd_ftran(BFD *bfd, double x[])
       return;
 }
 
+#if 1 /* 30/III-2016 */
+void bfd_ftran_s(BFD *bfd, FVS *x)
+{     /* sparse version of bfd_ftran */
+      /* (sparse mode is not implemented yet) */
+      int n = x->n;
+      int *ind = x->ind;
+      double *vec = x->vec;
+      int j, nnz = 0;
+      bfd_ftran(bfd, vec);
+      for (j = n; j >= 1; j--)
+      {  if (vec[j] != 0.0)
+            ind[++nnz] = j;
+      }
+      x->nnz = nnz;
+      return;
+}
+#endif
+
 void bfd_btran(BFD *bfd, double x[])
 {     /* perform backward transformation (solve system B'* x = b) */
 #ifdef GLP_DEBUG
@@ -398,6 +416,24 @@ void bfd_btran(BFD *bfd, double x[])
 #endif
       return;
 }
+
+#if 1 /* 30/III-2016 */
+void bfd_btran_s(BFD *bfd, FVS *x)
+{     /* sparse version of bfd_btran */
+      /* (sparse mode is not implemented yet) */
+      int n = x->n;
+      int *ind = x->ind;
+      double *vec = x->vec;
+      int j, nnz = 0;
+      bfd_btran(bfd, vec);
+      for (j = n; j >= 1; j--)
+      {  if (vec[j] != 0.0)
+            ind[++nnz] = j;
+      }
+      x->nnz = nnz;
+      return;
+}
+#endif
 
 int bfd_update(BFD *bfd, int j, int len, const int ind[], const double
       val[])

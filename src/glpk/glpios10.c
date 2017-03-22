@@ -4,7 +4,7 @@
 *  This code is part of GLPK (GNU Linear Programming Kit).
 *
 *  Copyright (C) 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008,
-*  2009, 2010, 2011, 2013 Andrew Makhorin, Department for Applied
+*  2009, 2010, 2011, 2013, 2017 Andrew Makhorin, Department for Applied
 *  Informatics, Moscow Aviation Institute, Moscow, Russia. All rights
 *  reserved. E-mail: <mao@gnu.org>.
 *
@@ -22,7 +22,11 @@
 *  along with GLPK. If not, see <http://www.gnu.org/licenses/>.
 ***********************************************************************/
 
-#include "glpenv.h"
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
+#include "env.h"
 #include "glpios.h"
 #include "rng.h"
 
@@ -56,7 +60,11 @@ struct VAR
       /* sorting key */
 };
 
+#ifndef __WOE__
 static int fcmp(const void *x, const void *y)
+#else
+static int __cdecl fcmp(const void *x, const void *y)
+#endif
 {     /* comparison routine */
       const struct VAR *vx = x, *vy = y;
       if (vx->d > vy->d)
@@ -307,12 +315,18 @@ skip: /* check if the time limit has been exhausted */
          if (ret != 0)
          {  if (T->parm->msg_lev >= GLP_MSG_ERR)
                xprintf("Warning: glp_simplex returned %d\n", ret);
+#if 1 /* 17/III-2016: fix memory leak */
+            xfree(x);
+#endif
             goto done;
          }
          ret = glp_get_status(lp);
          if (ret != GLP_OPT)
          {  if (T->parm->msg_lev >= GLP_MSG_ERR)
                xprintf("Warning: glp_get_status returned %d\n", ret);
+#if 1 /* 17/III-2016: fix memory leak */
+            xfree(x);
+#endif
             goto done;
          }
          for (j = 1; j <= n; j++)

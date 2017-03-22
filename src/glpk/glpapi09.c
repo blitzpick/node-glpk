@@ -23,7 +23,7 @@
 ***********************************************************************/
 
 #include "draft.h"
-#include "glpenv.h"
+#include "env.h"
 #include "glpios.h"
 #include "glpnpp.h"
 
@@ -219,29 +219,22 @@ int glp_get_num_bin(glp_prob *mip)
 *  GLP_ESTOP
 *     The search was prematurely terminated by application. */
 
-void glp_init_mip_ctx(glp_mip_ctx *ctx){
-    ctx->parm = NULL;
-    ctx->tree = NULL;
-    ctx->ret = 0;
-    ctx->done = 0;
- 
-    ctx->presolve.npp  = NULL;
-    ctx->presolve.mip = NULL;
-    ctx->presolve.state = PRE_NONE;
-}
-
-static void solve_mip_start(glp_prob *P, glp_mip_ctx *ctx,
+#if 0 /* 11/VII-2013 */
+static int solve_mip(glp_prob *P, const glp_iocp *parm)
+#else
+static int solve_mip(glp_prob *P, const glp_iocp *parm,
       glp_prob *P0 /* problem passed to glp_intopt */,
       NPP *npp /* preprocessor workspace or NULL */)
+#endif
 {     /* solve MIP directly without using the preprocessor */
-      const glp_iocp *parm = ctx->parm;
       glp_tree *T;
+      int ret;
       /* optimal basis to LP relaxation must be provided */
       if (glp_get_status(P) != GLP_OPT)
       {  if (parm->msg_lev >= GLP_MSG_ERR)
             xprintf("glp_intopt: optimal basis to initial LP relaxation"
                " not provided\n");
-         ctx->ret = GLP_EROOT;
+         ret = GLP_EROOT;
          goto done;
       }
       /* it seems all is ok */
@@ -253,26 +246,8 @@ static void solve_mip_start(glp_prob *P, glp_mip_ctx *ctx,
       T->P = P0;
       T->npp = npp;
 #endif
-      ctx->tree = T;
-    
       /* solve the problem instance */
-      ios_driver_run(T, &ctx->ios);
-      ctx->done = ctx->ios.done;
-      if (ctx->done) ctx->ret = ctx->ios.ret;
-      return;
-done:
-    ctx->done = 1;
-}
-
-static void solve_mip_stop(glp_prob *P, glp_mip_ctx *ctx,
-    glp_prob *P0 /* problem passed to glp_intopt */,
-    NPP *npp /* preprocessor workspace or NULL */)
-{
-      int ret = ctx->ret;
-      const glp_iocp *parm = ctx->parm;
-      glp_tree *T = ctx->tree;
-      if (!T) return;
-
+      ret = ios_driver(T);
       /* delete the branch-and-bound tree */
       ios_delete_tree(T);
       /* analyze exit code reported by the mip driver */
@@ -307,59 +282,46 @@ static void solve_mip_stop(glp_prob *P, glp_mip_ctx *ctx,
       }
       else
          xassert(ret != ret);
+done: return ret;
 }
 
-static void preprocess_and_solve_mip_start(glp_prob *P, glp_mip_ctx *ctx)
-{     
-      /* solve MIP using the preprocessor */
-      const glp_iocp *parm = ctx->parm;
-#ifdef HAVE_ENV
+static int preprocess_and_solve_mip(glp_prob *P, const glp_iocp *parm)
+{     /* solve MIP using the preprocessor */
       ENV *env = get_env_ptr();
       int term_out = env->term_out;
-#endif
       NPP *npp;
       glp_prob *mip = NULL;
       glp_bfcp bfcp;
       glp_smcp smcp;
-      
-	  ctx->presolve.state = PRE_CLEAN;
-
-	  if (parm->msg_lev >= GLP_MSG_ALL)
+      int ret;
+      if (parm->msg_lev >= GLP_MSG_ALL)
          xprintf("Preprocessing...\n");
       /* create preprocessor workspace */
-      ctx->presolve.npp = npp = npp_create_wksp();
+      npp = npp_create_wksp();
       /* load original problem into the preprocessor workspace */
       npp_load_prob(npp, P, GLP_OFF, GLP_MIP, GLP_OFF);
       /* process MIP prior to applying the branch-and-bound method */
-#ifdef HAVE_ENV
       if (!term_out || parm->msg_lev < GLP_MSG_ALL)
          env->term_out = GLP_OFF;
       else
          env->term_out = GLP_ON;
-      ctx->ret = npp_integer(npp, parm);
+      ret = npp_integer(npp, parm);
       env->term_out = term_out;
-#else
-    ctx->ret = npp_integer(npp, parm);
-#endif
-      if (ctx->ret == 0)
+      if (ret == 0)
          ;
-      else if (ctx->ret == GLP_ENOPFS)
+      else if (ret == GLP_ENOPFS)
       {  if (parm->msg_lev >= GLP_MSG_ALL)
             xprintf("PROBLEM HAS NO PRIMAL FEASIBLE SOLUTION\n");
       }
-      else if (ctx->ret == GLP_ENODFS)
+      else if (ret == GLP_ENODFS)
       {  if (parm->msg_lev >= GLP_MSG_ALL)
             xprintf("LP RELAXATION HAS NO DUAL FEASIBLE SOLUTION\n");
       }
       else
-         xassert(ctx->ret != ctx->ret);
-      if (ctx->ret != 0) {
-          ctx->presolve.state = PRE_DONE;
-          goto done;
-      };
+         xassert(ret != ret);
+      if (ret != 0) goto done;
       /* build transformed MIP */
       mip = glp_create_prob();
-      ctx->presolve.mip = mip;
       npp_build_prob(npp, mip);
       /* if the transformed MIP is empty, it has empty solution, which
          is optimal */
@@ -371,9 +333,7 @@ static void preprocess_and_solve_mip_start(glp_prob *P, glp_mip_ctx *ctx)
             xprintf("INTEGER OPTIMAL SOLUTION FOUND BY MIP PREPROCESSOR"
                "\n");
          }
-         
-         ctx->presolve.state = PRE_POST;
-         goto done;
+         goto post;
       }
       /* display some statistics */
       if (parm->msg_lev >= GLP_MSG_ALL)
@@ -400,7 +360,6 @@ static void preprocess_and_solve_mip_start(glp_prob *P, glp_mip_ctx *ctx)
       glp_get_bfcp(P, &bfcp);
       glp_set_bfcp(mip, &bfcp);
       /* scale the transformed problem */
-#ifdef HAVE_ENV
       if (!term_out || parm->msg_lev < GLP_MSG_ALL)
          env->term_out = GLP_OFF;
       else
@@ -415,80 +374,63 @@ static void preprocess_and_solve_mip_start(glp_prob *P, glp_mip_ctx *ctx)
          env->term_out = GLP_ON;
       glp_adv_basis(mip, 0);
       env->term_out = term_out;
-#else
-      glp_scale_prob(mip,
-        GLP_SF_GM | GLP_SF_EQ | GLP_SF_2N | GLP_SF_SKIP);
-      glp_adv_basis(mip, 0);
-#endif
       /* solve initial LP relaxation */
       if (parm->msg_lev >= GLP_MSG_ALL)
          xprintf("Solving LP relaxation...\n");
       glp_init_smcp(&smcp);
       smcp.msg_lev = parm->msg_lev;
+      /* respect time limit */
+      smcp.tm_lim = parm->tm_lim;
       mip->it_cnt = P->it_cnt;
-      ctx->ret = glp_simplex(mip, &smcp);
+      ret = glp_simplex(mip, &smcp);
       P->it_cnt = mip->it_cnt;
-      if (ctx->ret != 0)
+      if (ret == GLP_ETMLIM)
+         goto done;
+      else if (ret != 0)
       {  if (parm->msg_lev >= GLP_MSG_ERR)
             xprintf("glp_intopt: cannot solve LP relaxation\n");
-         ctx->ret = GLP_EFAIL;
-         ctx->presolve.state = PRE_DONE;
+         ret = GLP_EFAIL;
          goto done;
       }
       /* check status of the basic solution */
-      ctx->ret = glp_get_status(mip);
-      if (ctx->ret == GLP_OPT)
-         ctx->ret = 0;
-      else if (ctx->ret == GLP_NOFEAS)
-         ctx->ret = GLP_ENOPFS;
-      else if (ctx->ret == GLP_UNBND)
-         ctx->ret = GLP_ENODFS;
+      ret = glp_get_status(mip);
+      if (ret == GLP_OPT)
+         ret = 0;
+      else if (ret == GLP_NOFEAS)
+         ret = GLP_ENOPFS;
+      else if (ret == GLP_UNBND)
+         ret = GLP_ENODFS;
       else
-         xassert(ctx->ret != ctx->ret);
-      if (ctx->ret != 0){
-        ctx->presolve.state = PRE_DONE; // done
-        goto done;
-      };
+         xassert(ret != ret);
+      if (ret != 0) goto done;
       /* solve the transformed MIP */
       mip->it_cnt = P->it_cnt;
-
+#if 0 /* 11/VII-2013 */
+      ret = solve_mip(mip, parm);
+#else
       if (parm->use_sol)
       {  mip->mip_stat = P->mip_stat;
          mip->mip_obj = P->mip_obj;
       }
-    
-      solve_mip_start(mip, ctx, P, npp);
-      return;
-done:
-    ctx->done = 1;
-}
-
-static void preprocess_and_solve_mip_stop(glp_prob *P, glp_mip_ctx *ctx)
-{
-    glp_mip_ctx_presolve_state state = ctx->presolve.state;
-    if (state == PRE_NONE) return;
-    if (state == PRE_CLEAN) goto start;
-    if (state == PRE_POST) goto post;
-    if (state == PRE_DONE) goto done;
-    xassert(state != state);
-
-start:
-      P->it_cnt = ctx->presolve.mip->it_cnt;
+      ret = solve_mip(mip, parm, P, npp);
+#endif
+      P->it_cnt = mip->it_cnt;
       /* only integer feasible solution can be postprocessed */
-      if (!(ctx->presolve.mip->mip_stat == GLP_OPT || ctx->presolve.mip->mip_stat == GLP_FEAS))
-      {  P->mip_stat = ctx->presolve.mip->mip_stat;
+      if (!(mip->mip_stat == GLP_OPT || mip->mip_stat == GLP_FEAS))
+      {  P->mip_stat = mip->mip_stat;
          goto done;
       }
       /* postprocess solution from the transformed MIP */
-post: npp_postprocess(ctx->presolve.npp, ctx->presolve.mip);
+post: npp_postprocess(npp, mip);
       /* the transformed MIP is no longer needed */
-      glp_delete_prob(ctx->presolve.mip), ctx->presolve.mip = NULL;
+      glp_delete_prob(mip), mip = NULL;
       /* store solution to the original problem */
-      npp_unload_sol(ctx->presolve.npp, P);
+      npp_unload_sol(npp, P);
 done: /* delete the transformed MIP, if it exists */
-      if (ctx->presolve.mip != NULL) glp_delete_prob(ctx->presolve.mip);
+      if (mip != NULL) glp_delete_prob(mip);
       /* delete preprocessor workspace */
-      npp_delete_wksp(ctx->presolve.npp);
+      npp_delete_wksp(npp);
+      return ret;
 }
 
 #ifndef HAVE_ALIEN_SOLVER /* 28/V-2010 */
@@ -500,15 +442,20 @@ int _glp_intopt1(glp_prob *P, const glp_iocp *parm)
 }
 #endif
 
-void glp_intopt_start(glp_prob *P, glp_mip_ctx *ctx)
+int glp_intopt(glp_prob *P, const glp_iocp *parm)
 {     /* solve MIP problem with the branch-and-bound method */
-      int i, j;
-      const glp_iocp *parm = ctx->parm;
+      glp_iocp _parm;
+      int i, j, ret;
+#if 0 /* 04/IV-2016 */
       /* check problem object */
       if (P == NULL || P->magic != GLP_PROB_MAGIC)
          xerror("glp_intopt: P = %p; invalid problem object\n", P);
+#endif
       if (P->tree != NULL)
          xerror("glp_intopt: operation not allowed\n");
+      /* check control parameters */
+      if (parm == NULL)
+         parm = &_parm, glp_init_iocp((glp_iocp *)parm);
       if (!(parm->msg_lev == GLP_MSG_OFF ||
             parm->msg_lev == GLP_MSG_ERR ||
             parm->msg_lev == GLP_MSG_ON  ||
@@ -602,8 +549,8 @@ void glp_intopt_start(glp_prob *P, glp_mip_ctx *ctx)
          {  if (parm->msg_lev >= GLP_MSG_ERR)
                xprintf("glp_intopt: row %d: lb = %g, ub = %g; incorrect"
                   " bounds\n", i, row->lb, row->ub);
-            ctx->ret = GLP_EBOUND;
-            return;
+            ret = GLP_EBOUND;
+            goto done;
          }
       }
       for (j = 1; j <= P->n; j++)
@@ -612,8 +559,8 @@ void glp_intopt_start(glp_prob *P, glp_mip_ctx *ctx)
          {  if (parm->msg_lev >= GLP_MSG_ERR)
                xprintf("glp_intopt: column %d: lb = %g, ub = %g; incorr"
                   "ect bounds\n", j, col->lb, col->ub);
-            ctx->ret = GLP_EBOUND;
-            return;
+            ret = GLP_EBOUND;
+            goto done;
          }
       }
       /* bounds of all integer variables must be integral */
@@ -625,8 +572,8 @@ void glp_intopt_start(glp_prob *P, glp_mip_ctx *ctx)
             {  if (parm->msg_lev >= GLP_MSG_ERR)
                   xprintf("glp_intopt: integer column %d has non-intege"
                      "r lower bound %g\n", j, col->lb);
-               ctx->ret = GLP_EBOUND;
-               return;
+               ret = GLP_EBOUND;
+               goto done;
             }
          }
          if (col->type == GLP_UP || col->type == GLP_DB)
@@ -634,8 +581,8 @@ void glp_intopt_start(glp_prob *P, glp_mip_ctx *ctx)
             {  if (parm->msg_lev >= GLP_MSG_ERR)
                   xprintf("glp_intopt: integer column %d has non-intege"
                      "r upper bound %g\n", j, col->ub);
-               ctx->ret = GLP_EBOUND;
-               return;
+               ret = GLP_EBOUND;
+               goto done;
             }
          }
          if (col->type == GLP_FX)
@@ -643,8 +590,8 @@ void glp_intopt_start(glp_prob *P, glp_mip_ctx *ctx)
             {  if (parm->msg_lev >= GLP_MSG_ERR)
                   xprintf("glp_intopt: integer column %d has non-intege"
                      "r fixed value %g\n", j, col->lb);
-               ctx->ret = GLP_EBOUND;
-               return;
+               ret = GLP_EBOUND;
+               goto done;
             }
          }
       }
@@ -653,7 +600,7 @@ void glp_intopt_start(glp_prob *P, glp_mip_ctx *ctx)
       {  int ni = glp_get_num_int(P);
          int nb = glp_get_num_bin(P);
          char s[50];
-         xprintf("GLPK Integer Optimizer, v%d.%d\n", GLP_MAJOR_VERSION, GLP_MINOR_VERSION);
+         xprintf("GLPK Integer Optimizer, v%s\n", glp_version());
          xprintf("%d row%s, %d column%s, %d non-zero%s\n",
             P->m, P->m == 1 ? "" : "s", P->n, P->n == 1 ? "" : "s",
             P->nnz, P->nnz == 1 ? "" : "s");
@@ -673,55 +620,24 @@ void glp_intopt_start(glp_prob *P, glp_mip_ctx *ctx)
 #if 1 /* 28/V-2010 */
       if (parm->alien)
       {  /* use alien integer optimizer */
-         ctx->ret = _glp_intopt1(P, parm);
-         return;
+         ret = _glp_intopt1(P, parm);
+         goto done;
       }
 #endif
-    if (!parm->presolve)
-        solve_mip_start(P, ctx, P, NULL);
-      else
-        preprocess_and_solve_mip_start(P, ctx);
-}
-
-void glp_intopt_stop(glp_prob *P, glp_mip_ctx *ctx)
-{
-    preprocess_and_solve_mip_stop(P, ctx);
-    solve_mip_stop(P, ctx, P, NULL);
-    
-#if 1 /* 12/III-2013 */
-    if (ctx->ret == GLP_ENOPFS)
-        P->mip_stat = GLP_NOFEAS;
+      if (!parm->presolve)
+#if 0 /* 11/VII-2013 */
+         ret = solve_mip(P, parm);
+#else
+         ret = solve_mip(P, parm, P, NULL);
 #endif
-}
-
-void glp_intopt_run(glp_mip_ctx *ctx)
-{
-    ios_driver_run(ctx->tree, &ctx->ios);
-    ctx->done = ctx->ios.done;
-    if (ctx->done) ctx->ret = ctx->ios.ret;
-}
-
-int glp_intopt(glp_prob *P, const glp_iocp *parm)
-{
-    glp_iocp _parm;
-    glp_mip_ctx ctx;
-    
-    glp_init_mip_ctx(&ctx);
-    /* check control parameters */
-    if (parm == NULL)
-        parm = &_parm, glp_init_iocp((glp_iocp *)parm);
-    ctx.parm = parm;
-    
-    glp_intopt_start(P, &ctx);
-    while (!ctx.done){
-        glp_tree *T = ctx.tree;
-        xassert(T->parm->cb_func);
-        T->parm->cb_func(T, T->parm->cb_info);
-        
-        glp_intopt_run(&ctx);
-    }
-    glp_intopt_stop(P, &ctx);
-    return ctx.ret;
+      else
+         ret = preprocess_and_solve_mip(P, parm);
+#if 1 /* 12/III-2013 */
+      if (ret == GLP_ENOPFS)
+         P->mip_stat = GLP_NOFEAS;
+#endif
+done: /* return to the application program */
+      return ret;
 }
 
 /***********************************************************************
@@ -752,7 +668,6 @@ void glp_init_iocp(glp_iocp *parm)
       parm->out_dly = 10000;
       parm->cb_func = NULL;
       parm->cb_info = NULL;
-      parm->cb_reasons = 0xff;
       parm->cb_size = 0;
       parm->pp_tech = GLP_PP_ALL;
       parm->mip_gap = 0.0;
@@ -770,6 +685,9 @@ void glp_init_iocp(glp_iocp *parm)
       parm->use_sol = GLP_OFF;
       parm->save_sol = NULL;
       parm->alien = GLP_OFF;
+#endif
+#if 1 /* 16/III-2016; not documented--should not be used */
+      parm->flip = GLP_OFF;
 #endif
       return;
 }

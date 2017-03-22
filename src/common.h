@@ -1,6 +1,6 @@
 //
 //  common.h
-//  
+//
 //
 //  Created by Henri Gourvest on 20/05/2015.
 //
@@ -22,8 +22,6 @@
     Nan::ThrowTypeError(E);\
     return false; \
 }
-
-//catch (std::string s){Nan::ThrowError(s.c_str());return;}
 
 #define GLP_CATCH_RET(X) try{X}catch (std::string s) {Nan::ThrowError(s.c_str());return;}
 

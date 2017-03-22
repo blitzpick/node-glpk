@@ -21,7 +21,7 @@
 *  along with GLPK. If not, see <http://www.gnu.org/licenses/>.
 ***********************************************************************/
 
-#include "glpenv.h"
+#include "env.h"
 #include "zlib.h"
 
 struct glp_file
@@ -407,10 +407,9 @@ int glp_write(glp_file *f, const void *buf, int nnn)
 *
 *  The routine glp_format returns the number of characters written, or
 *  a negative value if an output error occurs. */
+
 int glp_format(glp_file *f, const char *fmt, ...)
-{
-#ifdef HAVE_ENV
-      ENV *env = get_env_ptr();
+{     ENV *env = get_env_ptr();
       va_list arg;
       int nnn;
       if (!(f->flag & IOWRT))
@@ -420,18 +419,6 @@ int glp_format(glp_file *f, const char *fmt, ...)
       xassert(0 <= nnn && nnn < TBUF_SIZE);
       va_end(arg);
       return nnn == 0 ? 0 : glp_write(f, env->term_buf, nnn);
-#else
-    va_list arg;
-    int nnn;
-    char term_buf[TBUF_SIZE];
-    if (!(f->flag & IOWRT))
-        xerror("glp_format: attempt to write to input stream\n");
-    va_start(arg, fmt);
-    nnn = vsprintf(term_buf, fmt, arg);
-    xassert(0 <= nnn && nnn < TBUF_SIZE);
-    va_end(arg);
-    return nnn == 0 ? 0 : glp_write(f, term_buf, nnn);
-#endif
 }
 
 /***********************************************************************
@@ -482,16 +469,9 @@ int glp_close(glp_file *f)
 #if 1 /* FIXME */
          else
          {  if (ret == 0)
-            {
-#ifdef HAVE_ENV
-               ENV *env = get_env_ptr();
+            {  ENV *env = get_env_ptr();
                sprintf(env->term_buf, "gzclose returned %d", errnum);
                put_err_msg(env->term_buf);
-#else
-               char term_buf[TBUF_SIZE];
-               sprintf(term_buf, "gzclose returned %d", errnum);
-               put_err_msg(term_buf);
-#endif
                ret = EOF;
             }
          }

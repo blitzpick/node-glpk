@@ -25,7 +25,7 @@
 #include "glphbm.h"
 #include "glprgr.h"
 #include "glpspm.h"
-#include "glpenv.h"
+#include "env.h"
 
 /***********************************************************************
 *  NAME

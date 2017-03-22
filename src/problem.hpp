@@ -9,7 +9,6 @@
 #include "jsonModelLoader.h"
 
 namespace NodeGLPK {
-
     using namespace v8;
 
     class Problem : public node::ObjectWrap {
@@ -108,7 +107,6 @@ namespace NodeGLPK {
             Nan::SetPrototypeMethod(tpl, "getColKind", GetColKind);
             Nan::SetPrototypeMethod(tpl, "getNumInt", GetNumInt);
             Nan::SetPrototypeMethod(tpl, "getNumBin", GetNumBin);
-            Nan::SetPrototypeMethod(tpl, "intoptSync", IntoptSync);
             Nan::SetPrototypeMethod(tpl, "intopt", Intopt);
             Nan::SetPrototypeMethod(tpl, "readProbSync", ReadProbSync);
             Nan::SetPrototypeMethod(tpl, "readProb", ReadProb);
@@ -215,6 +213,7 @@ namespace NodeGLPK {
             }
             return true;
         }
+
     private:
         explicit Problem(): node::ObjectWrap(){
             handle = glp_create_prob();
@@ -653,8 +652,6 @@ namespace NodeGLPK {
             Nan::AsyncQueueWorker(worker);
         }
 
-
-
         static void IocpCallback(glp_tree *T, void *info){
             Nan::Callback* cb = (Nan::Callback*)info;
             const unsigned argc = 1;
@@ -665,7 +662,6 @@ namespace NodeGLPK {
             host->thread = true;
             host->handle = NULL;
         };
-
 
         static bool IocpInit(glp_iocp *iocp, Local<Value> value){
             if (value->IsObject()){
@@ -747,9 +743,6 @@ namespace NodeGLPK {
                         V8CHECKBOOL(!val->IsFunction(), "cbFunc: should be a function");
                         iocp->cb_func = IocpCallback;
                         iocp->cb_info = new Nan::Callback(Local<Function>::Cast(val));
-                    } else if (keystr == "cbReasons"){
-                        V8CHECKBOOL(!val->IsInt32(), "cbReason: should be int32");
-                        iocp->cb_reasons = val->Int32Value();
                     } else {
                         std::string error("Unknow field: ");
                         error += keystr;
@@ -760,7 +753,7 @@ namespace NodeGLPK {
             return true;
         }
 
-        static NAN_METHOD(IntoptSync) {
+        static NAN_METHOD(Intopt) {
             V8CHECK(info.Length() > 1, "Wrong number of arguments");
 
             GLP_CATCH_RET(
@@ -777,87 +770,6 @@ namespace NodeGLPK {
                       if (iocp.cb_info) delete (Nan::Callback*)iocp.cb_info;
                       if (iocp.save_sol) delete[] iocp.save_sol;
             )
-        }
-
-        class IntoptWorker : public Nan::AsyncWorker {
-        public:
-            IntoptWorker(Nan::Callback *callback, Problem *lp)
-            : Nan::AsyncWorker(callback), lp(lp){
-                glp_init_iocp(&parm);
-                glp_init_mip_ctx(&ctx);
-                ctx.parm = &parm;
-                state = 0;
-            }
-
-            ~IntoptWorker(){
-                if (parm.cb_info) delete (Nan::Callback*)parm.cb_info;
-                if (parm.save_sol) delete[] parm.save_sol;
-            }
-
-            void Execute () {
-                try {
-                    if (state) {
-                        glp_intopt_run(&ctx);
-                    } else {
-                        state = 1;
-                        glp_intopt_start(lp->handle, &ctx);
-                    }
-                } catch (std::string s){
-                    ctx.done = 1;
-                    SetErrorMessage(s.c_str());
-                }
-            }
-            void WorkComplete() {
-                lp->thread = false;
-                Nan::HandleScope scope;
-                if (ctx.done) {
-                    state = 2;
-                    glp_intopt_stop(lp->handle, &ctx);
-                    if (ErrorMessage() == NULL)
-                        HandleOKCallback();
-                    else
-                        HandleErrorCallback();
-
-                    delete callback;
-                    callback = NULL;
-                } else {
-                    parm.cb_func(ctx.tree, parm.cb_info);
-                    lp->thread = true;
-                    Nan::AsyncQueueWorker(this);
-                }
-            }
-
-            void HandleOKCallback(){
-                Local<Value> info[] = {Nan::Null(), Nan::New<Int32>(ctx.ret)};
-                callback->Call(2, info);
-            }
-
-            void Destroy() {
-                if (state == 2) delete this;
-            }
-        public:
-            int state;
-            Problem *lp;
-            glp_iocp parm;
-            glp_mip_ctx ctx;
-        };
-
-        static NAN_METHOD(Intopt) {
-            V8CHECK(info.Length() != 2, "Wrong number of arguments");
-            V8CHECK(!(info[0]->IsObject() || info[0]->IsNull()) || !info[1]->IsFunction(), "Wrong arguments");
-
-            Problem* lp = ObjectWrap::Unwrap<Problem>(info.Holder());
-            V8CHECK(!lp->handle, "object deleted");
-            V8CHECK(lp->thread, "an async operation is inprogress");
-
-            Nan::Callback *callback = new Nan::Callback(info[1].As<Function>());
-            IntoptWorker *worker = new IntoptWorker(callback, lp);
-            if (!IocpInit(&worker->parm, info[0])){
-                worker->Destroy();
-                return;
-            }
-            lp->thread = true;
-            Nan::AsyncQueueWorker(worker);
         }
 
         static NAN_METHOD(ReadLpSync) {
@@ -1013,12 +925,10 @@ namespace NodeGLPK {
                 }
 
                 ret = glp_print_ranges(lp->handle, count, plist, info[1]->Int32Value(), V8TOCSTRING(info[2]));
-
             )
             if (plist) delete[] plist;
             info.GetReturnValue().Set(ret);
         }
-
 
         class PrintRangesWorker : public Nan::AsyncWorker {
         public:
@@ -1191,7 +1101,6 @@ namespace NodeGLPK {
             Nan::AsyncQueueWorker(worker);
         }
 
-
         class FactorizeWorker : public Nan::AsyncWorker {
         public:
             FactorizeWorker(Nan::Callback *callback, Problem *lp)
@@ -1231,232 +1140,112 @@ namespace NodeGLPK {
             Nan::AsyncQueueWorker(worker);
         }
 
-
-
         GLP_BIND_VOID_STR(Problem, SetProbName, glp_set_prob_name);
-
         GLP_BIND_STR(Problem, GetProbName, glp_get_prob_name);
-
         GLP_BIND_VOID_INT32(Problem, SetObjDir, glp_set_obj_dir);
-
         GLP_BIND_VALUE(Problem, GetObjDir, glp_get_obj_dir);
-
         GLP_BIND_VOID_INT32(Problem, AddRows, glp_add_rows);
-
         GLP_BIND_VOID_INT32_STR(Problem, SetRowName, glp_set_row_name);
-
         GLP_BIND_STR_INT32(Problem, GetRowName, glp_get_row_name);
-
         GLP_BIND_VOID_INT32_INT32_DOUBLE_DOUBLE(Problem, SetRowBnds, glp_set_row_bnds);
-
         GLP_BIND_VOID_INT32(Problem, AddCols, glp_add_cols);
-
         GLP_BIND_VOID_INT32_STR(Problem, SetColName, glp_set_col_name);
-
         GLP_BIND_STR_INT32(Problem, GetColName, glp_get_col_name);
-
         GLP_BIND_VOID_INT32_INT32_DOUBLE_DOUBLE(Problem, SetColBnds, glp_set_col_bnds);
-
         GLP_BIND_VOID_INT32_DOUBLE(Problem, SetObjCoef, glp_set_obj_coef);
-
         GLP_BIND_VALUE_INT32(Problem, GetObjCoef, glp_get_obj_coef);
-
         GLP_BIND_VALUE(Problem, GetObjVal, glp_get_obj_val);
-
         GLP_BIND_VOID_STR(Problem, SetObjName, glp_set_obj_name);
-
         GLP_BIND_STR(Problem, GetObjName, glp_get_obj_name);
-
         GLP_BIND_VOID_INT32_INT32ARRAY_FLOAT64ARRAY(Problem, SetMatRow, glp_set_mat_row);
-
         GLP_BIND_VALUE_INT32_CALLBACK(Problem, GetMatRow, glp_get_mat_row);
-
         GLP_BIND_VOID_INT32_INT32ARRAY_FLOAT64ARRAY(Problem, SetMatCol, glp_set_mat_col);
-
         GLP_BIND_VALUE_INT32_CALLBACK(Problem, GetMatCol, glp_get_mat_col);
-
         GLP_BIND_VOID(Problem, SortMatrix, glp_sort_matrix);
-
         GLP_BIND_VOID_INT32ARRAY(Problem, DelRows, glp_del_rows);
-
         GLP_BIND_VOID_INT32ARRAY(Problem, DelCols, glp_del_cols);
-
         GLP_BIND_VOID(Problem, Erase, glp_erase_prob);
-
         GLP_BIND_VALUE(Problem, GetNumRows, glp_get_num_rows);
-
         GLP_BIND_VALUE(Problem, GetNumCols, glp_get_num_cols);
-
         GLP_BIND_VALUE_INT32(Problem, GetRowType, glp_get_row_type);
-
         GLP_BIND_VALUE_INT32(Problem, GetRowLb, glp_get_row_lb);
-
         GLP_BIND_VALUE_INT32(Problem, GetRowUb, glp_get_row_ub);
-
         GLP_BIND_VALUE_INT32(Problem, GetColType, glp_get_col_type);
-
         GLP_BIND_VALUE_INT32(Problem, GetColLb, glp_get_col_lb);
-
         GLP_BIND_VALUE_INT32(Problem, GetColUb, glp_get_col_ub);
-
         GLP_BIND_VALUE(Problem, GetNumNz, glp_get_num_nz);
-
         GLP_BIND_VOID(Problem, CreateIndex, glp_create_index);
-
         GLP_BIND_VALUE_STR(Problem, FindRow, glp_find_row);
-
         GLP_BIND_VALUE_STR(Problem, FindCol, glp_find_col);
-
         GLP_BIND_VOID(Problem, DeleteIndex, glp_delete_index);
-
         GLP_BIND_VOID_INT32_DOUBLE(Problem, SetRii, glp_set_rii);
-
         GLP_BIND_VOID_INT32_DOUBLE(Problem, SetSjj, glp_set_sjj);
-
         GLP_BIND_VALUE_INT32(Problem, GetRii, glp_get_rii);
-
         GLP_BIND_VALUE_INT32(Problem, GetSjj, glp_get_sjj);
-
         GLP_BIND_VOID_INT32(Problem, ScaleSync, glp_scale_prob);
-
         GLP_BIND_VOID(Problem, UnscaleSync, glp_unscale_prob);
         GLP_ASYNC_VOID(Problem, Unscale, glp_unscale_prob);
-
         GLP_BIND_VOID_INT32_INT32(Problem, SetRowStat, glp_set_row_stat);
-
         GLP_BIND_VOID_INT32_INT32(Problem, SetColStat, glp_set_col_stat);
-
         GLP_BIND_VALUE_INT32(Problem, GetRowStat, glp_get_row_stat);
-
         GLP_BIND_VALUE_INT32(Problem, GetColStat, glp_get_col_stat);
-
         GLP_BIND_VOID(Problem, StdBasis, glp_std_basis);
-
         GLP_BIND_VOID_INT32(Problem, AdvBasis, glp_adv_basis);
-
         GLP_BIND_VOID(Problem, CpxBasis, glp_cpx_basis);
-
         GLP_BIND_VALUE(Problem, GetStatus, glp_get_status);
-
         GLP_BIND_VALUE(Problem, GetPrimStat, glp_get_prim_stat);
-
         GLP_BIND_VALUE(Problem, GetDualStat, glp_get_dual_stat);
-
         GLP_BIND_VALUE_INT32(Problem, GetRowPrim, glp_get_row_prim);
-
         GLP_BIND_VALUE_INT32(Problem, GetRowDual, glp_get_row_dual);
-
         GLP_BIND_VALUE_INT32(Problem, GetColPrim, glp_get_col_prim);
-
         GLP_BIND_VALUE_INT32(Problem, GetColDual, glp_get_col_dual);
-
         GLP_BIND_VALUE(Problem, GetUnbndRay, glp_get_unbnd_ray);
-
         GLP_BIND_VALUE(Problem, GetItCnt, glp_get_it_cnt);
-
         GLP_BIND_VOID_INT32(Problem, SetItCnt, glp_set_it_cnt);
-
         GLP_BIND_VALUE(Problem, IptStatus, glp_ipt_status);
-
         GLP_BIND_VALUE(Problem, IptObjVal, glp_ipt_obj_val);
-
         GLP_BIND_VALUE_INT32(Problem, IptRowPrim, glp_ipt_row_prim);
-
         GLP_BIND_VALUE_INT32(Problem, IptRowDual, glp_ipt_row_dual);
-
         GLP_BIND_VALUE_INT32(Problem, IptColPrim, glp_ipt_col_prim);
-
         GLP_BIND_VALUE_INT32(Problem, IptColDual, glp_ipt_col_dual);
-
         GLP_BIND_VOID_INT32_INT32(Problem, SetColKind, glp_set_col_kind);
-
         GLP_BIND_VALUE_INT32(Problem, GetColKind, glp_get_col_kind);
-
         GLP_BIND_VALUE(Problem, GetNumInt, glp_get_num_int);
-
         GLP_BIND_VALUE(Problem, GetNumBin, glp_get_num_bin);
-
         GLP_BIND_VALUE_INT32_STR(Problem, ReadProbSync, glp_read_prob);
         GLP_ASYNC_INT32_INT32_STR(Problem, ReadProb, glp_read_prob);
-
         GLP_BIND_VALUE_INT32_STR(Problem, WriteProbSync, glp_write_prob);
         GLP_ASYNC_INT32_INT32_STR(Problem, WriteProb, glp_write_prob);
-
         GLP_BIND_VALUE(Problem, MipStatus, glp_mip_status);
-
         GLP_BIND_VALUE(Problem, MipObjVal, glp_mip_obj_val);
-
         GLP_BIND_VALUE_INT32(Problem, MipRowVal, glp_mip_row_val);
-
         GLP_BIND_VALUE_INT32(Problem, MipColVal, glp_mip_col_val);
-
         GLP_BIND_VALUE_STR(Problem, PrintSolSync, glp_print_sol);
         GLP_ASYNC_INT32_STR(Problem, PrintSol, glp_print_sol);
-
         GLP_BIND_VALUE_STR(Problem, ReadSolSync, glp_read_sol);
         GLP_ASYNC_INT32_STR(Problem, ReadSol, glp_read_sol);
-
         GLP_BIND_VALUE_STR(Problem, WriteSolSync, glp_write_sol);
         GLP_ASYNC_INT32_STR(Problem, WriteSol, glp_write_sol);
-
         GLP_BIND_VALUE_STR(Problem, PrintIptSync, glp_print_ipt);
         GLP_ASYNC_INT32_STR(Problem, PrintIpt, glp_print_ipt);
-
         GLP_BIND_VALUE_STR(Problem, ReadIptSync, glp_read_ipt);
         GLP_ASYNC_INT32_STR(Problem, ReadIpt, glp_read_ipt);
-
         GLP_BIND_VALUE_STR(Problem, WriteIptSync, glp_write_ipt);
         GLP_ASYNC_INT32_STR(Problem, WriteIpt, glp_write_ipt);
-
         GLP_BIND_VALUE_STR(Problem, PrintMipSync, glp_print_mip);
         GLP_ASYNC_INT32_STR(Problem, PrintMip, glp_print_mip);
-
         GLP_BIND_VALUE_STR(Problem, ReadMipSync, glp_read_mip);
         GLP_ASYNC_INT32_STR(Problem, ReadMip, glp_read_mip);
-
         GLP_BIND_VALUE_STR(Problem, WriteMipSync, glp_write_mip);
         GLP_ASYNC_INT32_STR(Problem, WriteMip, glp_write_mip);
-
         GLP_BIND_VALUE(Problem, BfExists, glp_bf_exists);
-
         GLP_BIND_VALUE(Problem, FactorizeSync, glp_factorize);
-
         GLP_BIND_VALUE(Problem, BfUpdated, glp_bf_updated);
-
         GLP_BIND_VALUE_INT32(Problem, GetBhead, glp_get_bhead);
-
         GLP_BIND_VALUE_INT32(Problem, GetRowBind, glp_get_row_bind);
-
         GLP_BIND_VALUE_INT32(Problem, GetColBind, glp_get_col_bind);
-
         GLP_BIND_DELETE(Problem, Delete, glp_delete_prob);
-
-        //void glp_ftran(glp_prob *P, double x[]);
-
-        //void glp_btran(glp_prob *P, double x[]);
-
         GLP_BIND_VALUE(Problem, WarmUp, glp_warm_up);
-
-        //int glp_eval_tab_row(glp_prob *P, int k, int ind[], double val[]);
-
-        //int glp_eval_tab_col(glp_prob *P, int k, int ind[], double val[]);
-
-        //int glp_transform_row(glp_prob *P, int len, int ind[], double val[]);
-
-        //int glp_transform_col(glp_prob *P, int len, int ind[], double val[]);
-
-        //int glp_prim_rtest(glp_prob *P, int len, const int ind[],
-        //                   const double val[], int dir, double eps);
-
-        //int glp_dual_rtest(glp_prob *P, int len, const int ind[],
-        //                   const double val[], int dir, double eps);
-
-        //void glp_analyze_bound(glp_prob *P, int k, double *value1, int *var1,
-        //                       double *value2, int *var2);
-
-        //void glp_analyze_coef(glp_prob *P, int k, double *coef1, int *var1,
-        //                      double *value1, double *coef2, int *var2, double *value2);
-
 
         static Nan::Persistent<FunctionTemplate> constructor;
     public:

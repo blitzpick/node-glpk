@@ -4,9 +4,9 @@
 *  This code is part of GLPK (GNU Linear Programming Kit).
 *
 *  Copyright (C) 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008,
-*  2009, 2010, 2011, 2013, 2014, 2015 Andrew Makhorin, Department for
-*  Applied Informatics, Moscow Aviation Institute, Moscow, Russia. All
-*  rights reserved. E-mail: <mao@gnu.org>.
+*  2009, 2010, 2011, 2013, 2014, 2015, 2016, 2017 Andrew Makhorin,
+*  Department for Applied Informatics, Moscow Aviation Institute,
+*  Moscow, Russia. All rights reserved. E-mail: <mao@gnu.org>.
 *
 *  GLPK is free software: you can redistribute it and/or modify it
 *  under the terms of the GNU General Public License as published by
@@ -31,10 +31,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-    
+
 /* library version numbers: */
 #define GLP_MAJOR_VERSION  4
-#define GLP_MINOR_VERSION  57
+#define GLP_MINOR_VERSION  61
 
 typedef struct glp_prob glp_prob;
 /* LP/MIP problem object */
@@ -124,6 +124,9 @@ typedef struct
       int r_test;             /* ratio test technique: */
 #define GLP_RT_STD      0x11  /* standard (textbook) */
 #define GLP_RT_HAR      0x22  /* Harris' two-pass ratio test */
+#if 1 /* 16/III-2016 */
+#define GLP_RT_FLIP     0x33  /* long-step (flip-flop) ratio test */
+#endif
       double tol_bnd;         /* spx.tol_bnd */
       double tol_dj;          /* spx.tol_dj */
       double tol_piv;         /* spx.tol_piv */
@@ -173,14 +176,6 @@ typedef struct
       void (*cb_func)(glp_tree *T, void *info);
                               /* mip.cb_func */
       void *cb_info;          /* mip.cb_info */
-      int cb_reasons;          /* tree.reason flags */
-#define GLP_FROWGEN        1 << GLP_IROWGEN
-#define GLP_FBINGO         1 << GLP_IBINGO
-#define GLP_FHEUR          1 << GLP_IHEUR
-#define GLP_FCUTGEN        1 << GLP_ICUTGEN
-#define GLP_FBRANCH        1 << GLP_IBRANCH
-#define GLP_FSELECT        1 << GLP_ISELECT
-#define GLP_FPREPRO        1 << GLP_IPREPRO
       int cb_size;            /* mip.cb_size */
       int pp_tech;            /* preprocessing technique: */
 #define GLP_PP_NONE        0  /* disable preprocessing */
@@ -202,7 +197,10 @@ typedef struct
       const char *save_sol;   /* filename to save every new solution */
       int alien;              /* use alien solver */
 #endif
-      double foo_bar[24];     /* (reserved) */
+#if 1 /* 16/III-2016; not documented--should not be used */
+      int flip;               /* use long-step dual simplex */
+#endif
+      double foo_bar[23];     /* (reserved) */
 } glp_iocp;
 
 typedef struct
@@ -292,37 +290,6 @@ typedef struct
       /* (reserved for use in the future) */
 } glp_cpxcp;
 
-typedef struct {
-    int ret, done;
-    int p, curr_p, p_stat, d_stat;
-    int pred_p;
-    int bad_cut;
-    double old_obj;
-    double ttt;
-} ios_driver_ctx;
-    
-typedef enum {
-    PRE_NONE  = 0,
-    PRE_CLEAN = 1,
-    PRE_POST  = 2,
-    PRE_DONE  = 3
-} glp_mip_ctx_presolve_state;
-
-typedef struct {
-    int ret, done;
-    const glp_iocp *parm;
-    // solve_mip
-    glp_tree *tree;
-    
-    //presolve
-    struct{
-        void *npp;
-        glp_prob *mip;
-        glp_mip_ctx_presolve_state state;
-    } presolve;
-    ios_driver_ctx ios;
-} glp_mip_ctx;
-    
 typedef struct glp_tran glp_tran;
 /* MathProg translator workspace */
 
@@ -578,12 +545,6 @@ int glp_get_num_int(glp_prob *P);
 int glp_get_num_bin(glp_prob *P);
 /* retrieve number of binary columns */
 
-void glp_init_mip_ctx(glp_mip_ctx *ctx);
-void glp_intopt_start(glp_prob *P, glp_mip_ctx *ctx);
-void glp_intopt_stop(glp_prob *P, glp_mip_ctx *ctx);
-void glp_intopt_run(glp_mip_ctx *ctx);
-/* Async API */
-    
 int glp_intopt(glp_prob *P, const glp_iocp *parm);
 /* solve MIP problem with the branch-and-bound method */
 
@@ -767,6 +728,57 @@ int glp_ios_heur_sol(glp_tree *T, const double x[]);
 void glp_ios_terminate(glp_tree *T);
 /* terminate the solution process */
 
+#ifdef GLP_UNDOC
+int glp_gmi_cut(glp_prob *P, int j, int ind[], double val[], double
+      phi[]);
+/* generate Gomory's mixed integer cut (core routine) */
+#endif
+
+#ifdef GLP_UNDOC
+int glp_gmi_gen(glp_prob *P, glp_prob *pool, int max_cuts);
+/* generate Gomory's mixed integer cuts */
+#endif
+
+#ifdef GLP_UNDOC
+typedef struct glp_mir glp_mir;
+/* MIR cut generator workspace */
+#endif
+
+#ifdef GLP_UNDOC
+glp_mir *glp_mir_init(glp_prob *P);
+/* create and initialize MIR cut generator */
+#endif
+
+#ifdef GLP_UNDOC
+int glp_mir_gen(glp_prob *P, glp_mir *mir, glp_prob *pool);
+/* generate mixed integer rounding (MIR) cuts */
+#endif
+
+#ifdef GLP_UNDOC
+void glp_mir_free(glp_mir *mir);
+/* delete MIR cut generator workspace */
+#endif
+
+#ifdef GLP_UNDOC
+typedef struct glp_cfg glp_cfg;
+/* conflict graph descriptor */
+#endif
+
+#ifdef GLP_UNDOC
+glp_cfg *glp_cfg_init(glp_prob *P);
+/* create and initialize conflict graph */
+#endif
+
+#ifdef GLP_UNDOC
+void glp_cfg_free(glp_cfg *G);
+/* delete conflict graph descriptor */
+#endif
+
+#ifdef GLP_UNDOC
+int glp_clq_cut(glp_prob *P, glp_cfg *G, int ind[], double val[]);
+/* generate clique cut from conflict graph */
+#endif
+
 void glp_init_mpscp(glp_mpscp *parm);
 /* initialize MPS format control parameters */
 
@@ -796,6 +808,9 @@ int glp_write_prob(glp_prob *P, int flags, const char *fname);
 glp_tran *glp_mpl_alloc_wksp(void);
 /* allocate the MathProg translator workspace */
 
+void glp_mpl_init_rand(glp_tran *tran, int seed);
+/* initialize pseudo-random number generator */
+
 int glp_mpl_read_model(glp_tran *tran, const char *fname, int skip);
 /* read and translate model section */
 
@@ -814,12 +829,6 @@ int glp_mpl_postsolve(glp_tran *tran, glp_prob *prob, int sol);
 void glp_mpl_free_wksp(glp_tran *tran);
 /* free the MathProg translator workspace */
 
-char* glp_mpl_getlasterror(glp_tran *tran);
-/* get last error message */
-    
-int glp_main(int argc, const char *argv[]);
-/* stand-alone LP/MIP solver */
-
 int glp_read_cnfsat(glp_prob *P, const char *fname);
 /* read CNF-SAT problem data in DIMACS format */
 
@@ -835,17 +844,18 @@ int glp_minisat1(glp_prob *P);
 int glp_intfeas1(glp_prob *P, int use_bound, int obj_bound);
 /* solve integer feasibility problem */
 
-#ifdef HAVE_ENV
 int glp_init_env(void);
 /* initialize GLPK environment */
-    
+
 const char *glp_version(void);
 /* determine library version */
 
+const char *glp_config(const char *option);
+/* determine library configuration */
+
 int glp_free_env(void);
 /* free GLPK environment */
-#endif
-    
+
 void glp_puts(const char *s);
 /* write string on terminal */
 
@@ -858,11 +868,7 @@ void glp_vprintf(const char *fmt, va_list arg);
 int glp_term_out(int flag);
 /* enable/disable terminal output */
 
-#ifdef HAVE_ENV
 void glp_term_hook(int (*func)(void *info, const char *s), void *info);
-#else
-void glp_term_hook(void (*func)(const char *s));
-#endif
 /* install hook to intercept terminal output */
 
 int glp_open_tee(const char *name);
@@ -890,11 +896,7 @@ int glp_at_error(void);
 void glp_assert_(const char *expr, const char *file, int line);
 /* check for logical condition */
 
-#ifdef HAVE_ENV
 void glp_error_hook(void (*func)(void *info), void *info);
-#else
-void glp_error_hook(void (*func)(const char *s));
-#endif
 /* install hook to intercept abnormal termination */
 
 #define glp_malloc(size) glp_alloc(1, size)
@@ -918,7 +920,13 @@ void glp_mem_limit(int limit);
 void glp_mem_usage(int *count, int *cpeak, size_t *total,
       size_t *tpeak);
 /* get memory usage information */
-    
+
+double glp_time(void);
+/* determine current universal time */
+
+double glp_difftime(double t1, double t0);
+/* compute difference between two time values */
+
 typedef struct glp_graph glp_graph;
 typedef struct glp_vertex glp_vertex;
 typedef struct glp_arc glp_arc;

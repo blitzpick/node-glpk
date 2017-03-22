@@ -190,7 +190,7 @@ L100: /* Put permutation in the required form. */
 /**********************************************************************/
 
 #ifdef GLP_TEST
-#include "glpenv.h"
+#include "env.h"
 
 void test(int n, int ipp);
 

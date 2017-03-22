@@ -25,7 +25,7 @@
 #include <config.h>
 #endif
 
-#include "glpenv.h"
+#include "env.h"
 #include "jd.h"
 
 /***********************************************************************

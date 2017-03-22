@@ -26,7 +26,7 @@
 #define GLPSSX_H
 
 #include "bfx.h"
-#include "glpenv.h"
+#include "env.h"
 
 typedef struct SSX SSX;
 

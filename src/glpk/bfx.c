@@ -23,7 +23,7 @@
 ***********************************************************************/
 
 #include "bfx.h"
-#include "glpenv.h"
+#include "env.h"
 #include "lux.h"
 
 struct BFX

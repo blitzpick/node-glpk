@@ -3,7 +3,7 @@
 /***********************************************************************
 *  This code is part of GLPK (GNU Linear Programming Kit).
 *
-*  Copyright (C) 2008, 2013 Andrew Makhorin, Department for Applied
+*  Copyright (C) 2008-2013 Andrew Makhorin, Department for Applied
 *  Informatics, Moscow Aviation Institute, Moscow, Russia. All rights
 *  reserved. E-mail: <mao@gnu.org>.
 *
@@ -25,7 +25,7 @@
 #include <config.h>
 #endif
 
-#include "glpenv.h"
+#include "env.h"
 
 /* GNU version ********************************************************/
 

@@ -22,7 +22,7 @@
 ***********************************************************************/
 
 #include "btf.h"
-#include "glpenv.h"
+#include "env.h"
 #include "luf.h"
 #include "mc13d.h"
 #include "mc21a.h"

@@ -21,9 +21,7 @@
 *  along with GLPK. If not, see <http://www.gnu.org/licenses/>.
 ***********************************************************************/
 
-#include "glpenv.h"
-
-#ifdef HAVE_ENV
+#include "env.h"
 
 #define ALIGN 16
 /* some processors need data to be properly aligned, so this macro
@@ -250,43 +248,5 @@ void glp_mem_usage(int *count, int *cpeak, size_t *total,
          *tpeak = env->mem_tpeak;
       return;
 }
-
-#else
-
-void *glp_alloc(int n, int size)
-{
-    return calloc((size_t)n, (size_t)size);
-}
-
-void *glp_realloc(void *ptr, int n, int size)
-{
-    return realloc(ptr, (size_t)n * (size_t)size);
-}
-
-void glp_free(void *ptr)
-{
-    free(ptr);
-}
-
-void glp_mem_limit(int limit)
-{
-    
-}
-
-void glp_mem_usage(int *count, int *cpeak, size_t *total,
-                   size_t *tpeak)
-{
-    if (count != NULL)
-        *count = 0;
-    if (cpeak != NULL)
-        *cpeak = 0;
-    if (total != NULL)
-        *total = 0;
-    if (tpeak != NULL)
-        *tpeak = 0;
-    return;
-}
-
-#endif
 
 /* eof */

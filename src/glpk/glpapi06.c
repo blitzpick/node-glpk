@@ -22,7 +22,7 @@
 *  along with GLPK. If not, see <http://www.gnu.org/licenses/>.
 ***********************************************************************/
 
-#include "glpenv.h"
+#include "env.h"
 #include "glpios.h"
 #include "glpnpp.h"
 #if 0 /* 07/XI-2015 */
@@ -310,7 +310,6 @@ static int preprocess_and_solve_lp(glp_prob *P, const glp_smcp *parm)
       glp_get_bfcp(P, &bfcp);
       glp_set_bfcp(lp, &bfcp);
       /* scale the transformed problem */
-#ifdef HAVE_ENV
       {  ENV *env = get_env_ptr();
          int term_out = env->term_out;
          if (!term_out || parm->msg_lev < GLP_MSG_ALL)
@@ -330,10 +329,6 @@ static int preprocess_and_solve_lp(glp_prob *P, const glp_smcp *parm)
          glp_adv_basis(lp, 0);
          env->term_out = term_out;
       }
-#else
-      glp_scale_prob(lp, GLP_SF_AUTO);
-      glp_adv_basis(lp, 0);
-#endif
       /* solve the transformed LP */
       lp->it_cnt = P->it_cnt;
       ret = solve_lp(lp, parm);
@@ -374,8 +369,10 @@ int glp_simplex(glp_prob *P, const glp_smcp *parm)
       glp_smcp _parm;
       int i, j, ret;
       /* check problem object */
+#if 0 /* 04/IV-2016 */
       if (P == NULL || P->magic != GLP_PROB_MAGIC)
          xerror("glp_simplex: P = %p; invalid problem object\n", P);
+#endif
       if (P->tree != NULL && P->tree->reason != 0)
          xerror("glp_simplex: operation not allowed\n");
       /* check control parameters */
@@ -398,6 +395,9 @@ int glp_simplex(glp_prob *P, const glp_smcp *parm)
          xerror("glp_simplex: pricing = %d; invalid parameter\n",
             parm->pricing);
       if (!(parm->r_test == GLP_RT_STD ||
+#if 1 /* 16/III-2016 */
+            parm->r_test == GLP_RT_FLIP ||
+#endif
             parm->r_test == GLP_RT_HAR))
          xerror("glp_simplex: r_test = %d; invalid parameter\n",
             parm->r_test);
@@ -452,7 +452,7 @@ int glp_simplex(glp_prob *P, const glp_smcp *parm)
       }
       /* solve LP problem */
       if (parm->msg_lev >= GLP_MSG_ALL)
-      {  xprintf("GLPK Simplex Optimizer, v%d.%d\n", GLP_MAJOR_VERSION, GLP_MINOR_VERSION);
+      {  xprintf("GLPK Simplex Optimizer, v%s\n", glp_version());
          xprintf("%d row%s, %d column%s, %d non-zero%s\n",
             P->m, P->m == 1 ? "" : "s", P->n, P->n == 1 ? "" : "s",
             P->nnz, P->nnz == 1 ? "" : "s");
