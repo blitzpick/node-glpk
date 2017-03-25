@@ -62,8 +62,20 @@ public:
         return this->obj->Get(fromString(key.c_str()));
     }
 
+    V8Value operator [](int index) {
+        return this->obj->Get(index);
+    }
+
+    bool hasProperty(const char * key) {
+        return this->obj->Has(fromString(key));
+    }
+
     bool isUndefined() {
         return obj->IsUndefined();
+    }
+
+    bool isObject() {
+        return obj->IsObject();
     }
 
     int size() {
@@ -106,19 +118,6 @@ public:
         this->ar.push_back(value);
     }
 
-    void addConstraintIndex(string name, int index) {
-        this->constraintIndices[name] = index;
-    }
-
-    int getConstraintIndex(string name) {
-        map<string, int>::iterator constraint = this->constraintIndices.find(name);
-        if (constraint == this->constraintIndices.end()) {
-            return -1;
-        }
-
-        return constraint->second;
-    }
-
     void loadMatrixIntoProblem(glp_prob *problem) {
         glp_load_matrix(
             problem,
@@ -131,74 +130,138 @@ public:
 
 private:
     ObjectWrapper modelWrapper;
-    map<string, int> constraintIndices;
     vector<int> ia;
     vector<int> ja;
     vector<double> ar;
 };
 
-static void checkAndThrow(bool condition, const char *message) {
+static void checkAndThrow(bool condition, string message) {
     if (condition) {
         throw message;
     }
 }
 
-static int getConstraintType(string operation) {
-    if (operation == "max") {
-        return GLP_DB;
+static void setProblemName(glp_prob *problem, Model &model) {
+    V8Value name = model["name"];
+    if (name->IsString()) {
+        glp_set_prob_name(problem, toString(name).c_str());
     }
-
-    if (operation == "range") {
-        return GLP_DB;
-    }
-
-    if (operation == "lower") {
-        return GLP_LO;
-    }
-
-    if (operation == "upper") {
-        return GLP_UP;
-    }
-
-    if (operation == "equal") {
-        return GLP_FX;
-    }
-
-    if (operation == "unbounded") {
-        return GLP_FR;
-    }
-
-    throw (string("Unrecognized constraint type: ") + operation).c_str();
 }
 
-static pair<double, double> getConstraintBounds(string operation, V8Value operand) {
-    if (operation == "max") {
-        return make_pair(0.0, operand->NumberValue());
+static void setDirection(glp_prob *problem, Model &model) {
+    const char * errorMessage = "The model's direction property must be either 'minimize' or 'maximize'";
+
+    V8Value directionValue = model["direction"];
+    checkAndThrow(!directionValue->IsString(), errorMessage);
+
+    string direction = toString(directionValue);
+
+    if (direction == "maximize") {
+        glp_set_obj_dir(problem, GLP_MAX);
+        return;
     }
 
-    if (operation == "range") {
-        ArrayWrapper range(operand);
-        return make_pair(range[0]->NumberValue(), range[1]->NumberValue());
+    if (direction == "minimize") {
+        glp_set_obj_dir(problem, GLP_MIN);
+        return;
     }
 
-    if (operation == "lower") {
-        return make_pair(operand->NumberValue(), 0.0);
-    }
-
-    if (operation == "upper") {
-        return make_pair(0.0, operand->NumberValue());
-    }
-
-    if (operation == "equal") {
-        double value = operand->NumberValue();
-        return make_pair(value, value);
-    }
-
-    return make_pair(0.0, 0.0);
+    throw errorMessage;
 }
 
-static int getVariableKind(ObjectWrapper variable) {
-    string kind = toString(variable["kind"]);
+static void configureConstraint(glp_prob *problem, ObjectWrapper &constraint, string name, int index) {
+    glp_set_row_name(problem, index, name.c_str());
+
+    if (constraint.hasProperty("range")) {
+        V8Value range = constraint["range"];
+        checkAndThrow(!range->IsArray(), "The range property of constraint '" + name + "' must be an array");
+        ObjectWrapper rangeArray(range);
+        checkAndThrow(rangeArray["length"]->Uint32Value() != 2, "The range property of constraint '" + name + "' must be an array of two numbers");
+        V8Value lowerBoundValue = rangeArray[0];
+        V8Value upperBoundValue = rangeArray[1];
+        checkAndThrow(!lowerBoundValue->IsNumber() || !upperBoundValue->IsNumber(), "The range property of constraint '" + name + "' must be an array of two numbers");
+        double lowerBound = lowerBoundValue->NumberValue();
+        double upperBound = upperBoundValue->NumberValue();
+        checkAndThrow(lowerBound >= upperBound, "The first number in the range property of constraint '" + name + "' must be lower than the second");
+        glp_set_row_bnds(problem, index, GLP_DB, lowerBound, upperBound);
+        return;
+    }
+
+    if (constraint.hasProperty("lower")) {
+        V8Value lowerBound = constraint["lower"];
+        checkAndThrow(!lowerBound->IsNumber(), "The lower property of constraint '" + name + "' must be a number");
+        glp_set_row_bnds(problem, index, GLP_LO, lowerBound->NumberValue(), 0.0);
+        return;
+    }
+
+    if (constraint.hasProperty("upper")) {
+        V8Value upperBound = constraint["upper"];
+        checkAndThrow(!upperBound->IsNumber(), "The upper property of constraint '" + name + "' must be a number");
+        glp_set_row_bnds(problem, index, GLP_UP, 0.0, upperBound->NumberValue());
+        return;
+    }
+
+    if (constraint.hasProperty("equal")) {
+        V8Value numberValue = constraint["equal"];
+        checkAndThrow(!numberValue->IsNumber(), "The equal property of constraint '" + name + "' must be a number");
+        double number = numberValue->NumberValue();
+        glp_set_row_bnds(problem, index, GLP_FX, number, number);
+        return;
+    }
+
+    if (constraint.hasProperty("free")) {
+        V8Value freeValue = constraint["free"];
+        checkAndThrow(!freeValue->IsTrue(), "The free property of constraint '" + name + "' must be true");
+        glp_set_row_bnds(problem, index, GLP_FR, 0.0, 0.0);
+        return;
+    }
+
+    throw "The constraint '" + name + "' must contain an operation (one of 'range', 'lower', 'upper', 'equal', or 'free')";
+}
+
+static vector<string> getValidConstraintNames(ObjectWrapper &constraints) {
+    vector<string> validConstraintNames;
+    if (!constraints.isUndefined()) {
+        checkAndThrow(!constraints.isObject(), "The 'constraints' property must be an object");
+        ArrayWrapper constraintNames(constraints.getPropertyNames());
+        int size = constraints.size();
+        for (int i = 0; i < size; ++i) {
+            string name = toString(constraintNames[i]);
+            V8Value constraint = constraints[name];
+            if (!constraint->IsUndefined()) {
+                checkAndThrow(!constraint->IsObject(), "The constraint '" + name + "' is not an object");
+                validConstraintNames.push_back(name);
+            }
+        }
+    }
+
+    return validConstraintNames;
+}
+
+static void addConstraints(glp_prob *problem, Model &model) {
+    ObjectWrapper constraints(model["constraints"]);
+    vector<string> constraintNames = getValidConstraintNames(constraints);
+    int size = constraintNames.size();
+
+    if (size == 0) {
+        return;
+    }
+
+    glp_add_rows(problem, size);
+
+    for (int i = 0; i < size; ++i) {
+        string name = constraintNames[i];
+        ObjectWrapper constraint(constraints[name]);
+
+        configureConstraint(problem, constraint, name, i + 1);
+    }
+}
+
+static int getVariableKind(ObjectWrapper &variable, string name) {
+    V8Value kindValue = variable["kind"];
+    checkAndThrow(kindValue->IsUndefined(), "The variable '" + name + "' does not have a kind property");
+    checkAndThrow(!kindValue->IsString(), "The 'kind' property of the variable '" + name + "' must be a string");
+    string kind = toString(kindValue);
 
     if (kind == "binary") {
         return GLP_BV;
@@ -208,201 +271,141 @@ static int getVariableKind(ObjectWrapper variable) {
         return GLP_IV;
     }
 
-    return GLP_CV;
-}
-
-static void setConstraintBounds(glp_prob *problem, ObjectWrapper constraint, int index, V8Value operationName) {
-    string operation = toString(operationName);
-    V8Value operand = constraint[operationName];
-
-    int type = getConstraintType(operation);
-    pair<double, double> bounds = getConstraintBounds(operation, operand);
-    glp_set_row_bnds(problem, index, type, bounds.first, bounds.second);
-}
-
-static V8Value getDependentConstraintOperationName(ObjectWrapper dependentConstraint) {
-    ArrayWrapper propertyNames(dependentConstraint.getPropertyNames());
-    V8Value firstPropertyName = propertyNames[0];
-    if (toString(firstPropertyName) != "terms") {
-        return firstPropertyName;
+    if (kind == "continuous") {
+        return GLP_CV;
     }
 
-    return propertyNames[1];
+    throw "The 'kind' property of the variable named '" + name + "' must be one of 'binary', 'integer', or 'continuous'";
 }
 
-static void addDependentConstraints(glp_prob *problem, ObjectWrapper dependentConstraints) {
-    if (dependentConstraints.isUndefined()) {
-        return;
-    }
+static vector<string> getValidVariableNames(ObjectWrapper &variables) {
+    vector<string> validVariableNames;
 
-    int numDependentConstraints = dependentConstraints.size();
-
-    int start = glp_add_rows(problem, numDependentConstraints);
-    int numValues = glp_get_num_cols(problem);
-
-    ArrayWrapper dependentConstraintNames(dependentConstraints.getPropertyNames());
-    for (int i = 0; i < numDependentConstraints; ++i) {
-        int constraintIndex = start + i;
-        string name = toString(dependentConstraintNames[i]);
-        ObjectWrapper dependentConstraint(dependentConstraints[name]);
-
-        if (!dependentConstraint.isUndefined()) {
-            glp_set_row_name(problem, constraintIndex, name.c_str());
-
-            checkAndThrow(dependentConstraint.size() != 2, "Dependent constraints must contain a terms object and an operation");
-
-            V8Value operationName = getDependentConstraintOperationName(dependentConstraint);
-            setConstraintBounds(problem, dependentConstraint, constraintIndex, operationName);
-
-            vector<double> values(numValues + 1);
-            int rowIndices[numValues + 1];
-            double rowValues[numValues + 1];
-
-            ObjectWrapper terms = dependentConstraint["terms"];
-
-            int numTerms = terms.size();
-            ArrayWrapper termNames(terms.getPropertyNames());
-            for (int i = 0; i < numTerms; ++i) {
-                V8Value termName = termNames[i];
-                ObjectWrapper term(terms[termName]);
-
-                if (!term.isUndefined()) {
-                    checkAndThrow(term.size() != 2, "Dependent constraint terms must contain a coefficient and a constant");
-                    double coefficient = term["coefficient"]->NumberValue();
-                    double constant = term["constant"]->NumberValue();
-
-                    int constraintIndex = glp_find_row(problem, toString(termName).c_str());
-                    checkAndThrow(constraintIndex <= 0, "Found an unknown constraint name in the terms object");
-                    int count = glp_get_mat_row(problem, constraintIndex, rowIndices, rowValues);
-                    for (int i = 0; i < count; ++i) {
-                        values[rowIndices[i + 1]] += ((rowValues[i + 1] * coefficient) + constant);
-                    }
-                }
+    if (!variables.isUndefined()) {
+        checkAndThrow(!variables.isObject(), "The 'variables' property must be an object");
+        ArrayWrapper variableNames(variables.getPropertyNames());
+        int size = variables.size();
+        for (int i = 0; i < size; ++i) {
+            string name = toString(variableNames[i]);
+            V8Value variable = variables[name];
+            if (!variable->IsUndefined()) {
+                checkAndThrow(!variable->IsObject(), "The variable '" + name + "' is not an object");
+                validVariableNames.push_back(name);
             }
-
-            int indices[numValues + 1];
-            for (int i = 0; i < numValues; ++i) {
-                indices[i + 1] = i + 1;
-            }
-            glp_set_mat_row(problem, constraintIndex, numValues, indices, values.data());
         }
     }
+
+    return validVariableNames;
 }
 
 static void addVariables(glp_prob *problem, Model &model) {
-    V8Value objective = model["objective"];
-    checkAndThrow(objective->IsUndefined(), "You must specify an objective value in the model");
+    V8Value objectiveNameValue = model["objective"];
+    checkAndThrow(objectiveNameValue->IsUndefined(), "You must specify an objective value name in the model");
+    checkAndThrow(!objectiveNameValue->IsString(), "The model's objective property must be a string");
+    string objectiveName = toString(objectiveNameValue);
+
+    glp_set_obj_name(problem, objectiveName.c_str());
 
     ObjectWrapper variables(model["variables"]);
-    checkAndThrow(variables.isUndefined(), "You must specify variables in the model");
+    vector<string> variableNames = getValidVariableNames(variables);
+    int size = variableNames.size();
 
-    int numVariables = variables.size();
-    glp_add_cols(problem, numVariables);
+    if (size == 0) {
+        return;
+    }
 
-    ArrayWrapper variableNames(variables.getPropertyNames());
-    for (int i = 0; i < numVariables; ++i) {
-        int index = i + 1;
-        V8Value name = variableNames[i];
-        ObjectWrapper variable(variables[name]);
+    glp_add_cols(problem, size);
 
-        if (!variable.isUndefined()) {
-            glp_set_col_name(problem, index, toString(name).c_str());
-            glp_set_col_kind(problem, index, getVariableKind(variable));
+    for (int i = 0; i < size; ++i) {
+        int variableIndex = i + 1;
+        string variableName = variableNames[i];
+        ObjectWrapper variable(variables[variableName]);
 
-            ObjectWrapper values(variable["values"]);
-            glp_set_obj_coef(problem, index, values[objective]->NumberValue());
+        glp_set_col_name(problem, variableIndex, variableName.c_str());
+        glp_set_col_kind(problem, variableIndex, getVariableKind(variable, variableName));
 
-            int numValues = values.size();
-            ArrayWrapper valueNames(values.getPropertyNames());
-            for (int i = 0; i < numValues; ++i) {
-                V8Value name = valueNames[i];
-                int constraintIndex = model.getConstraintIndex(toString(name));
-                if (constraintIndex > 0) {
-                    double value = values[name]->NumberValue();
-                    model.addMatrixEntry(constraintIndex, index, value);
-                }
+        ObjectWrapper values(variable["values"]);
+        checkAndThrow(!values.isObject(), "The 'values' property of the variable '" + variableName + "' must be an object");
+
+        V8Value objectiveValue = values[objectiveName];
+        checkAndThrow(!objectiveValue->IsNumber(), "The '" + objectiveName + "' property of the variable '" + variableName + "' must be a number");
+        glp_set_obj_coef(problem, variableIndex, objectiveValue->NumberValue());
+
+        int numValues = values.size();
+        ArrayWrapper valueNames(values.getPropertyNames());
+        for (int i = 0; i < numValues; ++i) {
+            string name = toString(valueNames[i]);
+            V8Value value = values[name];
+            int constraintIndex = glp_find_row(problem, name.c_str());
+            checkAndThrow(!value->IsNumber(), "The '" + name + "' property of the variable '" + variableName + "' must be a number");
+            double number = value->NumberValue();
+            if (number != 0 && constraintIndex != 0) {
+                model.addMatrixEntry(constraintIndex, variableIndex, number);
             }
         }
     }
 }
 
-static void addConstraints(glp_prob *problem, Model &model) {
-    ObjectWrapper constraints(model["constraints"]);
-    checkAndThrow(constraints.isUndefined(), "You must specify constraints in the model");
+static vector<string> getExplicitConstraintNames(ObjectWrapper &constraints) {
+    vector<string> explicitConstraintNames;
 
-    int size = constraints.size();
-    glp_add_rows(problem, size);
-
-    ArrayWrapper constraintNames(constraints.getPropertyNames());
+    vector<string> validConstraintNames = getValidConstraintNames(constraints);
+    int size = validConstraintNames.size();
 
     for (int i = 0; i < size; ++i) {
-        int index = i + 1;
-        string name = toString(constraintNames[i]);
+        string name = validConstraintNames[i];
         ObjectWrapper constraint(constraints[name]);
-
-        if (!constraint.isUndefined()) {
-            model.addConstraintIndex(name, index);
-
-            glp_set_row_name(problem, index, name.c_str());
-
-            checkAndThrow(constraint.size() != 1, "Constraints may contain only a single operation.");
-
-            V8Value operationName = constraint.getPropertyName(0);
-            setConstraintBounds(problem, constraint, index, operationName);
+        V8Value coefficients = constraint["coefficients"];
+        if (coefficients->IsObject()) {
+            explicitConstraintNames.push_back(name);
         }
     }
+
+    return explicitConstraintNames;
 }
 
-static int getDirection(Model &model) {
-    V8Value directionValue = model["direction"];
-    checkAndThrow(!directionValue->IsString(), "The model's direction property must be either 'minimize' or 'maximize'");
+static void addExplicitConstraintValues(glp_prob *problem, Model &model) {
+    ObjectWrapper constraints(model["constraints"]);
+    vector<string> explicitConstraintNames = getExplicitConstraintNames(constraints);
+    int size = explicitConstraintNames.size();
 
-    string direction = toString(model["direction"]);
+    for (int i = 0; i < size; ++i) {
+        string constraintName = explicitConstraintNames[i];
+        int constraintIndex = glp_find_row(problem, constraintName.c_str());
+        ObjectWrapper constraint(constraints[constraintName]);
+        ObjectWrapper coefficients(constraint["coefficients"]);
+        ArrayWrapper coefficientNames(coefficients.getPropertyNames());
 
-    if (direction == "maximize") {
-        return GLP_MAX;
+        int numCoefficients = coefficients.size();
+        for (int i = 0; i < numCoefficients; ++i) {
+            string variableName = toString(coefficientNames[i]);
+            int variableIndex = glp_find_col(problem, variableName.c_str());
+            checkAndThrow(variableIndex == 0, "The constraint '" + constraintName + "' references a variable '" + variableName + "' which does not exist");
+
+            V8Value coefficient = coefficients[variableName];
+            checkAndThrow(!coefficient->IsNumber(), "The coefficient for variable '" + variableName + "' in the constraint '" + constraintName + "' must be a number");
+            double number = coefficient->NumberValue();
+            if (number != 0) {
+                model.addMatrixEntry(constraintIndex, variableIndex, coefficient->NumberValue());
+            }
+        }
     }
-
-    if (direction == "minimize") {
-        return GLP_MIN;
-    }
-
-    throw "'direction' must be either 'minimize' or 'maximize'";
 }
 
 namespace NodeGLPK {
     void JsonModelLoader::Load(glp_prob *problem, V8Object _model) {
         try {
-            Model model(_model);
-
+            // Enable names for constraints and variables
             glp_create_index(problem);
 
-            V8Value name = model["name"];
-            if (name->IsString()) {
-                glp_set_prob_name(problem, toString(name).c_str());
-            }
-
-            glp_set_obj_dir(problem, getDirection(model));
-
+            Model model(_model);
+            setProblemName(problem, model);
+            setDirection(problem, model);
             addConstraints(problem, model);
             addVariables(problem, model);
+            addExplicitConstraintValues(problem, model);
 
             model.loadMatrixIntoProblem(problem);
-
-            ObjectWrapper dependentConstraints(model["dependentConstraints"]);
-            addDependentConstraints(problem, dependentConstraints);
-        } catch (const char *msg) {
-            Nan::ThrowTypeError(msg);
-        } catch (string msg) {
-            Nan::ThrowTypeError(msg.c_str());
-        } catch (...) {
-            Nan::ThrowTypeError("Unknown execption");
-        }
-    }
-
-    void JsonModelLoader::AddDependentConstraints(glp_prob *problem, V8Object dependentConstraints) {
-        try {
-            addDependentConstraints(problem, dependentConstraints);
         } catch (const char *msg) {
             Nan::ThrowTypeError(msg);
         } catch (string msg) {

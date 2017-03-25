@@ -14,7 +14,7 @@ if (prob.getNumInt() > 0) {
       // ...
     }
   }
-  prob.intoptSync({
+  prob.intopt({
     cbFunc: callback
   });
 }
