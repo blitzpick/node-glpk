@@ -379,14 +379,17 @@ static void addExplicitConstraintValues(glp_prob *problem, Model &model) {
         int numCoefficients = coefficients.size();
         for (int i = 0; i < numCoefficients; ++i) {
             string variableName = toString(coefficientNames[i]);
-            int variableIndex = glp_find_col(problem, variableName.c_str());
-            checkAndThrow(variableIndex == 0, "The constraint '" + constraintName + "' references a variable '" + variableName + "' which does not exist");
-
             V8Value coefficient = coefficients[variableName];
-            checkAndThrow(!coefficient->IsNumber(), "The coefficient for variable '" + variableName + "' in the constraint '" + constraintName + "' must be a number");
-            double number = coefficient->NumberValue();
-            if (number != 0) {
-                model.addMatrixEntry(constraintIndex, variableIndex, coefficient->NumberValue());
+
+            if (!coefficient->IsUndefined()) {
+                int variableIndex = glp_find_col(problem, variableName.c_str());
+                checkAndThrow(variableIndex == 0, "The constraint '" + constraintName + "' references a variable '" + variableName + "' which does not exist");
+
+                checkAndThrow(!coefficient->IsNumber(), "The coefficient for variable '" + variableName + "' in the constraint '" + constraintName + "' must be a number");
+                double number = coefficient->NumberValue();
+                if (number != 0) {
+                    model.addMatrixEntry(constraintIndex, variableIndex, coefficient->NumberValue());
+                }
             }
         }
     }
