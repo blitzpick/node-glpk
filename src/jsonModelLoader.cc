@@ -182,7 +182,7 @@ static void configureConstraint(glp_prob *problem, ObjectWrapper &constraint, st
         checkAndThrow(!lowerBoundValue->IsNumber() || !upperBoundValue->IsNumber(), "The range property of constraint '" + name + "' must be an array of two numbers");
         double lowerBound = lowerBoundValue->NumberValue();
         double upperBound = upperBoundValue->NumberValue();
-        checkAndThrow(lowerBound >= upperBound, "The first number in the range property of constraint '" + name + "' must be lower than the second");
+        checkAndThrow(lowerBound > upperBound, "The first number in the range property of constraint '" + name + "' must be less than or equal to the second");
         glp_set_row_bnds(problem, index, GLP_DB, lowerBound, upperBound);
         return;
     }
